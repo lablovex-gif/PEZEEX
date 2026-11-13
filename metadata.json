@@ -1,0 +1,8 @@
+{
+  "name": "Remix Pezeex | Shopping Assistant",
+  "description": "Smart Shopping Assistant",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

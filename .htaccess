@@ -1,0 +1,46 @@
+# =============================================================
+# If setting Environment Variable via .htaccess on your host:
+# SetEnv GEMINI_API_KEY your_api_key_here
+# =============================================================
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Route API requests directly to PHP scripts
+  RewriteRule ^api/search/?$ api/search.php [L,QSA]
+  RewriteRule ^api/health/?$ api/health.php [L,QSA]
+
+  # 2. Prevent direct access to sensitive files & source files
+  RewriteRule ^(.*\/)?config(\.example)?\.php$ - [F,L]
+  RewriteRule ^\.env - [F,L]
+  RewriteRule ^\.htaccess$ - [F,L]
+  RewriteRule ^\.git - [F,L]
+  RewriteRule ^(server\.ts|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|bun\.lock|scripts/) - [F,L]
+  RewriteRule \.(log|bak|old|sql|sh|ts|tsx|cjs)$ - [F,L]
+
+  # 3. Standard Vite React Single Page Application (SPA) routing
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Security Headers
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+</IfModule>
+
+# MIME types
+<IfModule mod_mime.c>
+  AddType application/javascript .js
+  AddType text/css .css
+  AddType application/json .json
+  AddType image/svg+xml .svg
+  AddType application/manifest+json .webmanifest
+</IfModule>
+
+# Security: Disable directory listing
+Options -Indexes
