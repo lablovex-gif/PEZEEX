@@ -21,15 +21,19 @@ export interface ProductsResponse {
 export async function getProductAlternativesStream(
   productName: string,
   language: string = "العربية",
-  onBatch?: (partial: ProductsResponse) => void
+  onBatch?: (partial: ProductsResponse) => void,
+  country?: string
 ): Promise<ProductsResponse | null> {
   const safeProductName = (productName || "").trim().slice(0, 200);
   const safeLanguage = (language || "العربية").trim().slice(0, 40);
+  const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
+    ? country.trim().toUpperCase()
+    : "";
   try {
     const res = await fetch("/api/search-stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productName: safeProductName, language: safeLanguage }),
+      body: JSON.stringify({ productName: safeProductName, language: safeLanguage, country: safeCountry }),
     });
 
     if (res.status === 429) {
@@ -106,13 +110,21 @@ export async function getProductAlternativesStream(
     console.warn("Streaming search unavailable, falling back to /api/search", err?.message || err);
   }
 
-  return getProductAlternatives(productName, language);
+  return getProductAlternatives(productName, language, country);
 }
 
-export async function getProductAlternatives(productName: string, language: string = "العربية"): Promise<ProductsResponse | null> {
+export async function getProductAlternatives(
+  productName: string,
+  language: string = "العربية",
+  country?: string
+): Promise<ProductsResponse | null> {
+  const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
+    ? country.trim().toUpperCase()
+    : "";
   const requestBody = JSON.stringify({
     productName: (productName || "").trim().slice(0, 200),
     language: (language || "العربية").trim().slice(0, 40),
+    country: safeCountry,
   });
 
   const requestOptions = {

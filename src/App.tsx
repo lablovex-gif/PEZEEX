@@ -2385,6 +2385,54 @@ export function getDailySearchesLeftText(count: number, lang: string): string {
   }
 }
 
+
+const TIMEZONE_TO_COUNTRY: Record<string, string> = {
+  "Asia/Riyadh": "sa",
+  "Asia/Dubai": "ae",
+  "Africa/Cairo": "eg",
+  "Asia/Kuwait": "kw",
+  "Asia/Qatar": "qa",
+  "Asia/Bahrain": "bh",
+  "Asia/Muscat": "om",
+  "Asia/Amman": "jo",
+  "Asia/Beirut": "lb",
+  "Asia/Baghdad": "iq",
+  "Africa/Casablanca": "ma",
+  "Africa/Algiers": "dz",
+  "Africa/Tunis": "tn",
+  "Europe/London": "gb",
+  "Europe/Berlin": "de",
+  "Europe/Paris": "fr",
+  "Europe/Madrid": "es",
+  "Europe/Rome": "it",
+  "Europe/Amsterdam": "nl",
+  "Europe/Istanbul": "tr",
+  "Asia/Istanbul": "tr",
+  "Asia/Kolkata": "in",
+  "Asia/Calcutta": "in",
+  "Asia/Tokyo": "jp",
+  "Australia/Sydney": "au",
+  "Australia/Melbourne": "au",
+  "America/Toronto": "ca",
+  "America/Vancouver": "ca",
+  "America/Sao_Paulo": "br",
+};
+
+function inferCountryFromBrowser(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && TIMEZONE_TO_COUNTRY[tz]) {
+      return TIMEZONE_TO_COUNTRY[tz];
+    }
+    const lang = (navigator.language || "").trim();
+    const parts = lang.split("-");
+    if (parts.length >= 2 && /^[a-zA-Z]{2}$/.test(parts[1])) {
+      return parts[1].toLowerCase();
+    }
+  } catch {}
+  return "us";
+}
+
 export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -2397,7 +2445,7 @@ export default function App() {
   const [showLanguages, setShowLanguages] = useState(false);
   const [showContact, setShowContact] = useState(false);
   const [currentLang, setCurrentLang] = useState<string>(() => getInitialLanguage());
-  const [userCountry, setUserCountry] = useState<string>('us');
+  const [userCountry, setUserCountry] = useState<string>(() => inferCountryFromBrowser());
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showIntroDialog, setShowIntroDialog] = useState(() => {
     return localStorage.getItem('hasDismissedIntro') !== 'true';
@@ -2489,16 +2537,28 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Fetch user country via IP
+  // Detect user country via IP (GeoJS primary + server proxy header fallback + browser timezone fallback)
   useEffect(() => {
-    fetch('https://get.geojs.io/v1/ip/country.json')
-      .then(res => res.json())
+    let active = true;
+    fetch('/api/location')
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
-        if (data && data.country) {
+        if (active && data && typeof data.country === 'string' && /^[a-zA-Z]{2}$/.test(data.country)) {
           setUserCountry(data.country.toLowerCase());
         }
       })
-      .catch(err => console.error("Error fetching country info:", err));
+      .catch(() => {});
+
+    fetch('https://get.geojs.io/v1/ip/country.json')
+      .then(res => res.json())
+      .then(data => {
+        if (active && data && typeof data.country === 'string' && /^[a-zA-Z]{2}$/.test(data.country)) {
+          setUserCountry(data.country.toLowerCase());
+        }
+      })
+      .catch(() => {});
+
+    return () => { active = false; };
   }, []);
 
   // PWA logic
@@ -2705,7 +2765,7 @@ export default function App() {
           { type: "user", content: currentQuery },
           { type: "ai", content: mappedPartial }
         ]);
-      });
+      }, userCountry);
 
       const mappedResponse = buildMappedResponse(response);
 
@@ -2884,6 +2944,7 @@ export default function App() {
                         </div>
                         {t.dir === "rtl" && <Languages className="text-primary" size={22} />}
                       </button>
+
                       <SheetClose 
                         onClick={() => {
                           setIsIntroFromMenu(true);
