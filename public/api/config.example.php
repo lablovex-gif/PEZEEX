@@ -10,10 +10,15 @@
  */
 
 return [
-    // Put your API key here:
+    // Single key OR array of dozens/hundreds of keys (automatically rotated on every search):
+    'DAHL_API_KEYS' => [
+        // 'dahl_key_1',
+        // 'dahl_key_2',
+    ],
+    // Or single/comma-separated key:
     'AI_API_KEY' => 'YOUR_API_KEY_HERE',
 
     // Optional: Specify custom model or custom base URL if needed
-    // 'AI_MODEL' => 'gemini-2.5-flash',
-    // 'AI_BASE_URL' => 'https://api.openai.com/v1',
+    'AI_BASE_URL' => 'https://inference.dahl.global/v1',
+    'AI_MODEL' => 'MiniMaxAI/MiniMax-M2.7',
 ];

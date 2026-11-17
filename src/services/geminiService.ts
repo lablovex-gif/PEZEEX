@@ -18,6 +18,30 @@ export interface ProductsResponse {
   message?: string;
 }
 
+const MAX_CLIENT_STREAM_CHARS = 256 * 1024;
+
+function sanitizeClientAlternatives(rawList: unknown): ProductAlternative[] {
+  if (!Array.isArray(rawList)) return [];
+  return rawList
+    .slice(0, 24)
+    .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .map((item) => ({
+      name: typeof item.name === "string" ? item.name.slice(0, 160) : "",
+      price: typeof item.price === "string" ? item.price.slice(0, 40) : "-",
+      description: typeof item.description === "string" ? item.description.slice(0, 220) : "",
+      similarity: typeof item.similarity === "string" ? item.similarity.slice(0, 20) : "85%",
+      link: typeof item.link === "string" ? item.link.slice(0, 500) : "",
+      exactUrl: typeof item.exactUrl === "string" ? item.exactUrl.slice(0, 500) : "",
+      imageUrl: typeof item.imageUrl === "string" ? item.imageUrl.slice(0, 300) : undefined,
+      store: typeof item.store === "string" ? item.store.slice(0, 80) : "",
+      storeDomain: typeof item.storeDomain === "string" ? item.storeDomain.slice(0, 120) : undefined,
+      logoUrl: typeof item.logoUrl === "string" ? item.logoUrl.slice(0, 300) : undefined,
+      searchKey: typeof item.searchKey === "string" ? item.searchKey.slice(0, 120) : undefined,
+      isPromo: false,
+    }))
+    .filter((item) => item.name.length > 0 && item.store.length > 0);
+}
+
 export async function getProductAlternativesStream(
   productName: string,
   language: string = "العربية",
@@ -29,9 +53,12 @@ export async function getProductAlternativesStream(
   const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
     ? country.trim().toUpperCase()
     : "";
+  const streamAbort = new AbortController();
+  const streamTimer = setTimeout(() => streamAbort.abort(), 65000);
   try {
     const res = await fetch("/api/search-stream", {
       method: "POST",
+      signal: streamAbort.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ productName: safeProductName, language: safeLanguage, country: safeCountry }),
     });
@@ -50,12 +77,19 @@ export async function getProductAlternativesStream(
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
+      let totalChars = 0;
       let latestResponse: ProductsResponse | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        const chunkText = decoder.decode(value, { stream: true });
+        totalChars += chunkText.length;
+        if (totalChars > MAX_CLIENT_STREAM_CHARS) {
+          streamAbort.abort();
+          break;
+        }
+        buffer += chunkText;
 
         const events = buffer.split("\n\n");
         buffer = events.pop() || "";
@@ -78,20 +112,25 @@ export async function getProductAlternativesStream(
               if (latestResponse && latestResponse.alternatives.length > 0) {
                 return latestResponse;
               }
-              const streamErr: any = new Error(parsed.details || parsed.error || "Search stream failed");
+              const streamErr: any = new Error(
+                typeof parsed.details === "string"
+                  ? parsed.details
+                  : (typeof parsed.error === "string" ? parsed.error : "Search stream failed")
+              );
               streamErr.isStreamServerError = true;
               throw streamErr;
             }
+            const cleanMessage = typeof parsed.message === "string" ? parsed.message.slice(0, 300) : undefined;
             if (parsed.type === "batch") {
               latestResponse = {
-                alternatives: parsed.alternatives || [],
-                message: parsed.message,
+                alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                message: cleanMessage,
               };
               onBatch?.(latestResponse);
             } else if (parsed.type === "done") {
               latestResponse = {
-                alternatives: parsed.alternatives || [],
-                message: parsed.message,
+                alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                message: cleanMessage,
               };
               onBatch?.(latestResponse);
               return latestResponse;
@@ -108,6 +147,8 @@ export async function getProductAlternativesStream(
     if (err?.status === 429 || err?.isStreamServerError) throw err;
     // Fallback to standard /api/search or PHP bridge only when SSE streaming itself is unavailable
     console.warn("Streaming search unavailable, falling back to /api/search", err?.message || err);
+  } finally {
+    clearTimeout(streamTimer);
   }
 
   return getProductAlternatives(productName, language, country);
@@ -127,8 +168,12 @@ export async function getProductAlternatives(
     country: safeCountry,
   });
 
-  const requestOptions = {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 55000);
+
+  const requestOptions: RequestInit = {
     method: "POST",
+    signal: controller.signal,
     headers: {
       "Content-Type": "application/json",
     },
@@ -146,31 +191,38 @@ export async function getProductAlternatives(
     "public/api/search.php"
   ];
 
-  for (const endpoint of candidateEndpoints) {
-    try {
-      const res = await fetch(endpoint, requestOptions);
-      if (res.status !== 404) {
-        response = res;
-        break;
+  try {
+    for (const endpoint of candidateEndpoints) {
+      try {
+        const res = await fetch(endpoint, requestOptions);
+        if (res.status !== 404) {
+          response = res;
+          break;
+        }
+      } catch (err: any) {
+        if (!lastError) lastError = err;
       }
-    } catch (err: any) {
-      if (!lastError) lastError = err;
     }
-  }
 
-  if (response && response.ok) {
-    const data: ProductsResponse = await response.json();
-    return data;
-  }
+    if (response && response.ok) {
+      const data: any = await response.json();
+      return {
+        alternatives: sanitizeClientAlternatives(data?.alternatives),
+        message: typeof data?.message === "string" ? data.message.slice(0, 300) : undefined,
+      };
+    }
 
-  if (response && !response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${response.status}: ${response.statusText}`;
-    const err: any = new Error(detailedMessage);
-    err.status = response.status;
-    err.data = errData;
-    throw err;
-  }
+    if (response && !response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${response.status}: ${response.statusText}`;
+      const err: any = new Error(detailedMessage);
+      err.status = response.status;
+      err.data = errData;
+      throw err;
+    }
 
-  throw lastError || new Error("تعذر الاتصال بخدمة البحث.");
+    throw lastError || new Error("تعذر الاتصال بخدمة البحث.");
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

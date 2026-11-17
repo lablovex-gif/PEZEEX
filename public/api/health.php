@@ -7,6 +7,10 @@
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header("Content-Security-Policy: default-src 'none'; frame-ancestors 'none'");
+header('Cross-Origin-Resource-Policy: same-origin');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Cache-Control: no-store');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'HEAD') {

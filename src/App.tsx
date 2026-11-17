@@ -6,7 +6,6 @@
 import { useState, useRef, useEffect, memo } from "react";
 import { 
   ShoppingBag, 
-  Globe, 
   Menu, 
   Search, 
   Mail, 
@@ -2540,7 +2539,10 @@ export default function App() {
   // Detect user country via IP (GeoJS primary + server proxy header fallback + browser timezone fallback)
   useEffect(() => {
     let active = true;
-    fetch('/api/location')
+    const locCtrl = new AbortController();
+    const locTimer = setTimeout(() => locCtrl.abort(), 4000);
+
+    fetch('/api/location', { signal: locCtrl.signal })
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (active && data && typeof data.country === 'string' && /^[a-zA-Z]{2}$/.test(data.country)) {
@@ -2549,8 +2551,8 @@ export default function App() {
       })
       .catch(() => {});
 
-    fetch('https://get.geojs.io/v1/ip/country.json')
-      .then(res => res.json())
+    fetch('https://get.geojs.io/v1/ip/country.json', { signal: locCtrl.signal })
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (active && data && typeof data.country === 'string' && /^[a-zA-Z]{2}$/.test(data.country)) {
           setUserCountry(data.country.toLowerCase());
@@ -2558,7 +2560,11 @@ export default function App() {
       })
       .catch(() => {});
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+      clearTimeout(locTimer);
+      locCtrl.abort();
+    };
   }, []);
 
   // PWA logic
@@ -2748,7 +2754,7 @@ export default function App() {
             .filter((item): item is ProductAlternative => item !== null && item.link !== "");
           return {
             alternatives: mappedAlts,
-            message: resData.message
+            message: typeof resData.message === "string" ? resData.message.slice(0, 400) : undefined
           } as ProductsResponse;
         }
         if (resData && Array.isArray(resData)) {
@@ -3240,11 +3246,11 @@ export default function App() {
                                             <span>{item.price && item.price !== '-' ? item.price : (currentLang === "العربية" ? "السعر عند البائع" : "Check Price")}</span>
                                           </div>
 
-                                          {item.link ? (
+                                          {sanitizeExternalHref(item.link) ? (
                                             <Button 
                                               render={
                                                 <a 
-                                                  href={item.link} 
+                                                  href={sanitizeExternalHref(item.link)} 
                                                   target="_blank" 
                                                   rel="noopener noreferrer"
                                                 />
