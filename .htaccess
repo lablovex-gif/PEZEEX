@@ -13,27 +13,16 @@ DirectoryIndex index.html index.php
   RewriteRule ^api/search/?$ api/search.php [L,QSA]
   RewriteRule ^api/health/?$ api/health.php [L,QSA]
 
-  # 2. Block direct access to .git and scripts directories if present
-  RewriteCond %{REQUEST_URI} !^/\.well-known/
-  RewriteRule (^|/)\.git(/|$) - [F,L]
-  RewriteRule ^scripts(/|$) - [F,L]
-
-  # 3. Standard Vite React Single Page Application (SPA) routing
+  # 2. Standard Vite React Single Page Application (SPA) routing
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]
 </IfModule>
 
-# Block direct public access to sensitive config, env, key, and source files (LiteSpeed & Apache safe)
-<FilesMatch "(^\.|^config(\.example)?\.php$|^keys\.txt$|^server\.(cjs|ts)$|^vite\.config\.ts$|^tsconfig\.json$|^package(-lock)?\.json$|^bun\.lock$|^components\.json$|^metadata\.json$|^add-reddit\.cjs$|^download_logos\.ts$|^test-litb\.js$|^updateTranslations\.js$|\.(env|log|bak|old|sql|sh|ts|tsx|cjs|map|md)$)">
-  <IfModule mod_authz_core.c>
-    Require all denied
-  </IfModule>
-  <IfModule !mod_authz_core.c>
-    Order allow,deny
-    Deny from all
-  </IfModule>
+# Block direct public access to sensitive config, env, and key files (LiteSpeed safe)
+<FilesMatch "^(\.env(\..*)?|\.keys|\.htaccess|config(\.example)?\.php|keys\.txt|server\.(cjs|ts)|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|bun\.lock|components\.json|metadata\.json)$">
+  Require all denied
 </FilesMatch>
 
 # Security Headers
@@ -54,6 +43,3 @@ DirectoryIndex index.html index.php
   AddType image/svg+xml .svg
   AddType application/manifest+json .webmanifest
 </IfModule>
-
-# Security: Disable directory listing
-Options -Indexes
