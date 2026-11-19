@@ -1,3 +1,5 @@
+DirectoryIndex index.html index.php
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
@@ -6,19 +8,27 @@
   RewriteRule ^api/search/?$ api/search.php [L,QSA]
   RewriteRule ^api/health/?$ api/health.php [L,QSA]
 
-  # 2. Prevent direct access to sensitive files, dotfiles, & backups
-  RewriteRule ^(.*\/)?config(\.example)?\.php$ - [F,L]
-  RewriteRule (^|/)\.(?!well-known/) - [F,L]
-  RewriteRule (^|/)keys\.txt$ - [F,L]
-  RewriteRule ^(server\.cjs|server\.ts|package(-lock)?\.json|metadata\.json) - [F,L]
-  RewriteRule \.(log|bak|old|sql|sh|ts|tsx|cjs|map|md)$ - [F,L]
+  # 2. Block direct access to .git directory if present
+  RewriteCond %{REQUEST_URI} !^/\.well-known/
+  RewriteRule (^|/)\.git(/|$) - [F,L]
 
   # 3. Standard Vite React Single Page Application (SPA) routing
-  # If the requested file or directory exists, serve it directly
+  RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^ index.html [L]
+  RewriteRule . /index.html [L]
 </IfModule>
+
+# Block direct public access to sensitive config, env, key, and source files (LiteSpeed & Apache safe)
+<FilesMatch "(^\.|^config(\.example)?\.php$|^keys\.txt$|^server\.(cjs|ts)$|^package(-lock)?\.json$|^metadata\.json$|\.(env|log|bak|old|sql|sh|ts|tsx|cjs|map|md)$)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
 
 # Security Headers
 <IfModule mod_headers.c>
