@@ -23,7 +23,7 @@ const MAX_CLIENT_STREAM_CHARS = 256 * 1024;
 function sanitizeClientAlternatives(rawList: unknown): ProductAlternative[] {
   if (!Array.isArray(rawList)) return [];
   return rawList
-    .slice(0, 24)
+    .slice(0, 18)
     .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
     .map((item) => ({
       name: typeof item.name === "string" ? item.name.slice(0, 160) : "",
@@ -48,7 +48,7 @@ export async function getProductAlternativesStream(
   onBatch?: (partial: ProductsResponse) => void,
   country?: string
 ): Promise<ProductsResponse | null> {
-  const safeProductName = (productName || "").trim().slice(0, 900);
+  const safeProductName = (productName || "").trim().slice(0, 1500);
   const safeLanguage = (language || "العربية").trim().slice(0, 40);
   const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
     ? country.trim().toUpperCase()
@@ -163,7 +163,7 @@ export async function getProductAlternatives(
     ? country.trim().toUpperCase()
     : "";
   const requestBody = JSON.stringify({
-    productName: (productName || "").trim().slice(0, 900),
+    productName: (productName || "").trim().slice(0, 1500),
     language: (language || "العربية").trim().slice(0, 40),
     country: safeCountry,
   });

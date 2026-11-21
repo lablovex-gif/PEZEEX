@@ -1843,21 +1843,32 @@ const BLOCKED_CLIENT_STORES = new Set([
 ]);
 
 const isPrivateOrInternalHostClient = (hostname: string): boolean => {
-  const h = (hostname || '').toLowerCase().trim().replace(/^\[|\]$/g, '');
-  if (!h) return true;
+  const h = (hostname || '').toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+  if (!h || h.length > 253) return true;
   if (
     h === 'localhost' ||
+    h === 'metadata' ||
+    h === 'metadata.google.internal' ||
     h === '::1' ||
     h.endsWith('.localhost') ||
     h.endsWith('.local') ||
     h.endsWith('.internal') ||
     h.endsWith('.lan') ||
     h.endsWith('.home') ||
-    h.endsWith('.arpa')
+    h.endsWith('.arpa') ||
+    h.endsWith('.corp') ||
+    h.endsWith('.intranet')
   ) {
     return true;
   }
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) {
+    return true;
+  }
+  if (/^\d+$/.test(h) || /^0x[0-9a-f]+$/i.test(h)) {
+    return true;
+  }
+  const labels = h.split('.');
+  if (labels.every((lbl) => /^(?:\d+|0x[0-9a-f]+)$/i.test(lbl))) {
     return true;
   }
   return false;
@@ -1870,7 +1881,7 @@ const isValidStoreDomainClient = (domain: string): boolean => {
 };
 
 const sanitizeExternalHref = (rawUrl?: string): string => {
-  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  if (!rawUrl || typeof rawUrl !== 'string' || /[\u0000-\u001F\u007F]/.test(rawUrl)) return '';
   let clean = rawUrl.trim().replace(/^[\s<\[\(]+|[\s>\]\)]+$/g, '');
   const match = clean.match(/(https?:\/\/[^\s\)]+)/i);
   if (match) {
@@ -1885,6 +1896,7 @@ const sanitizeExternalHref = (rawUrl?: string): string => {
     const parsed = new URL(clean);
     if (parsed.protocol !== 'https:') return '';
     if (parsed.username || parsed.password) return '';
+    if (parsed.port && parsed.port !== '443') return '';
     if (isPrivateOrInternalHostClient(parsed.hostname)) return '';
     return parsed.toString();
   } catch {
@@ -2432,7 +2444,7 @@ function inferCountryFromBrowser(): string {
   return "us";
 }
 
-const MAX_SEARCH_CHARS = 900;
+const MAX_SEARCH_CHARS = 1500;
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -2704,7 +2716,7 @@ export default function App() {
                   q.endsWith("؟") || 
                   q.endsWith("?") || 
                   /^(who|what|where|when|why|how|can|is|are|do|does|hi|hello|hey)\b/i.test(q);
-    const isUrl = /^http/i.test(q);
+    const isUrl = /(?:https?:\/\/|www\.|[a-z0-9-]+\.[a-z]{2,}\/)/i.test(q);
     setIsConversationalRequest(!isUrl && isConv);
 
     const currentQuery = queryToSearch;
