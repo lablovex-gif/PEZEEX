@@ -1659,13 +1659,15 @@ function checkBurstLimit(ip: string): boolean {
   return true;
 }
 
+const MAX_SEARCH_QUERY_LENGTH = 900;
+
 function sanitizeSearchInput(raw: string): string {
   return (raw || "")
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/["`<>\\]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 180);
+    .slice(0, MAX_SEARCH_QUERY_LENGTH);
 }
 
 function sanitizeLanguageInput(raw: unknown): string {
@@ -1901,6 +1903,13 @@ app.post("/api/search-stream", async (req, res) => {
   }
 
   const { productName, language = "العربية", country } = req.body;
+  if (typeof productName === "string" && productName.trim().length > MAX_SEARCH_QUERY_LENGTH) {
+    return res.status(400).json({
+      error: "Query too long",
+      message: `الحد الأقصى للبحث هو ${MAX_SEARCH_QUERY_LENGTH} حرف.`,
+      details: `Search query must not exceed ${MAX_SEARCH_QUERY_LENGTH} characters.`
+    });
+  }
   const cleanProductName = typeof productName === "string" ? sanitizeSearchInput(productName) : "";
   if (!cleanProductName) {
     return res.status(400).json({ error: "Product name or search query is required." });
@@ -2005,6 +2014,13 @@ app.post("/api/search", async (req, res) => {
     }
 
     const { productName, language = "العربية", country } = req.body;
+    if (typeof productName === "string" && productName.trim().length > MAX_SEARCH_QUERY_LENGTH) {
+      return res.status(400).json({
+        error: "Query too long",
+        message: `الحد الأقصى للبحث هو ${MAX_SEARCH_QUERY_LENGTH} حرف.`,
+        details: `Search query must not exceed ${MAX_SEARCH_QUERY_LENGTH} characters.`
+      });
+    }
     const cleanProductName = typeof productName === "string" ? sanitizeSearchInput(productName) : "";
     if (!cleanProductName) {
       return res.status(400).json({ error: "Product name or search query is required." });

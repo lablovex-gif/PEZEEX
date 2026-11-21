@@ -2432,6 +2432,8 @@ function inferCountryFromBrowser(): string {
   return "us";
 }
 
+const MAX_SEARCH_CHARS = 900;
+
 export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -2684,7 +2686,7 @@ export default function App() {
 
   const handleSearch = async (e?: any, queryOverride?: string) => {
     if (e) e.preventDefault();
-    const queryToSearch = queryOverride || searchQuery;
+    const queryToSearch = (queryOverride || searchQuery).slice(0, MAX_SEARCH_CHARS);
     if (!queryToSearch.trim() || loading) return;
 
     // Check client daily search limit (25 searches per day)
@@ -3403,6 +3405,7 @@ export default function App() {
               id="pezeex-search-input"
               name="pezeex_search_field"
               type="text"
+              maxLength={MAX_SEARCH_CHARS}
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -3412,7 +3415,7 @@ export default function App() {
               placeholder={dailySearchUsage.isLimitReached ? (t.dailyLimitExceededShort || "تم استنفاد الحد اليومي (25 بحثاً)") : t.placeholder}
               className={`h-14 text-base rounded-2xl border-2 border-primary/20 focus-visible:border-primary focus-visible:ring-primary/20 transition-all shadow-xl bg-background/50 backdrop-blur-md ${t.dir === "rtl" ? "pr-12 pl-16" : "pl-12 pr-16"} ${dailySearchUsage.isLimitReached ? "opacity-75 cursor-pointer border-amber-500/30" : ""}`}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => setSearchQuery(e.target.value.slice(0, MAX_SEARCH_CHARS))}
               onClick={() => {
                 if (dailySearchUsage.isLimitReached) {
                   setShowLimitDialog(true);
@@ -3431,6 +3434,12 @@ export default function App() {
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
             </Button>
           </form>
+
+          {searchQuery.length >= 750 && (
+            <div className={`mt-1.5 px-2 text-[11px] font-medium ${t.dir === "rtl" ? "text-left" : "text-right"} ${searchQuery.length >= MAX_SEARCH_CHARS ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+              {searchQuery.length} / {MAX_SEARCH_CHARS}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground mt-2.5">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-primary/5 border border-primary/10 select-none">

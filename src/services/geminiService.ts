@@ -48,7 +48,7 @@ export async function getProductAlternativesStream(
   onBatch?: (partial: ProductsResponse) => void,
   country?: string
 ): Promise<ProductsResponse | null> {
-  const safeProductName = (productName || "").trim().slice(0, 200);
+  const safeProductName = (productName || "").trim().slice(0, 900);
   const safeLanguage = (language || "العربية").trim().slice(0, 40);
   const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
     ? country.trim().toUpperCase()
@@ -163,7 +163,7 @@ export async function getProductAlternatives(
     ? country.trim().toUpperCase()
     : "";
   const requestBody = JSON.stringify({
-    productName: (productName || "").trim().slice(0, 200),
+    productName: (productName || "").trim().slice(0, 900),
     language: (language || "العربية").trim().slice(0, 40),
     country: safeCountry,
   });

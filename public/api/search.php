@@ -588,14 +588,25 @@ if (!is_array($input)) {
     exit;
 }
 
+$maxSearchChars = 900;
 $rawProductName = !empty($input['productName']) && is_string($input['productName']) ? $input['productName'] : '';
 $rawLanguage = !empty($input['language']) && is_string($input['language']) ? $input['language'] : 'العربية';
 $rawCountry = !empty($input['country']) && is_string($input['country']) ? $input['country'] : '';
 
+if (mb_strlen(trim($rawProductName), 'UTF-8') > $maxSearchChars) {
+    http_response_code(400);
+    echo json_encode([
+        'error' => 'Query too long',
+        'message' => 'الحد الأقصى للبحث هو 900 حرف.',
+        'details' => 'Search query must not exceed 900 characters.'
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $cleanProductName = preg_replace('/[\x00-\x1F\x7F"\'`<>\\\\]+/u', ' ', strip_tags($rawProductName));
-$cleanProductName = mb_substr(trim(preg_replace('/\s+/u', ' ', $cleanProductName)), 0, 180);
+$cleanProductName = mb_substr(trim(preg_replace('/\s+/u', ' ', $cleanProductName)), 0, $maxSearchChars, 'UTF-8');
 $cleanLanguage = preg_replace('/[\x00-\x1F\x7F"\'`<>\\\\]+/u', '', strip_tags($rawLanguage));
-$cleanLanguage = mb_substr(trim($cleanLanguage), 0, 40) ?: 'العربية';
+$cleanLanguage = mb_substr(trim($cleanLanguage), 0, 40, 'UTF-8') ?: 'العربية';
 
 if (empty($cleanProductName)) {
     http_response_code(400);
