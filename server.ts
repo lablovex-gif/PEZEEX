@@ -53,10 +53,12 @@ app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
   } else {
     const isProd = process.env.NODE_ENV === "production";
-    const scriptSrc = isProd ? "'self'" : "'self' 'unsafe-inline' 'unsafe-eval'";
+    const scriptSrc = isProd
+      ? "'self' https://convertlink.com https://*.convertlink.com https://www.googletagmanager.com"
+      : "'self' 'unsafe-inline' 'unsafe-eval' https://convertlink.com https://*.convertlink.com https://www.googletagmanager.com";
     res.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://www.google.com https://icons.duckduckgo.com https://*.gstatic.com data: blob:; connect-src 'self' https://get.geojs.io; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self' https://aistudio.google.com https://*.google.com https://*.googleusercontent.com`
+      `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://www.google.com https://icons.duckduckgo.com https://*.gstatic.com data: blob:; connect-src 'self' https://get.geojs.io https://convertlink.com https://*.convertlink.com; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self' https://aistudio.google.com https://*.google.com https://*.googleusercontent.com`
     );
   }
   next();
