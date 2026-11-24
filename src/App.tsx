@@ -29,6 +29,8 @@ import {
   Pin, 
   Heart,
   ShieldAlert,
+  ShieldCheck,
+  FileText,
   Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,6 +57,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getProductAlternativesStream, ProductAlternative, ProductsResponse } from "./services/geminiService";
 import { motion, AnimatePresence } from "motion/react";
 import { installTranslations } from "./lib/installTranslations";
+import { LegalDocumentType, legalMenuTranslations } from "./lib/legalContent";
+import { LegalPage } from "./components/LegalPage";
 
 const RedditIcon = ({ size = 24 }: { size?: number }) => (
   <svg
@@ -2446,7 +2450,21 @@ function inferCountryFromBrowser(): string {
 
 const MAX_SEARCH_CHARS = 1500;
 
+function getLegalTabFromPathname(pathname: string): LegalDocumentType | null {
+  const normalized = pathname.toLowerCase().replace(/\/+$/, "");
+  if (normalized === "/privacy" || normalized === "/privacy-policy") {
+    return "privacy";
+  }
+  if (normalized === "/terms" || normalized === "/terms-of-use") {
+    return "terms";
+  }
+  return null;
+}
+
 export default function App() {
+  const [activeLegalTab, setActiveLegalTab] = useState<LegalDocumentType | null>(() =>
+    getLegalTabFromPathname(window.location.pathname)
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [dailySearchUsage, setDailySearchUsage] = useState<ClientDailyUsage>(() => getClientDailySearch());
@@ -2461,6 +2479,9 @@ export default function App() {
   const [userCountry, setUserCountry] = useState<string>(() => inferCountryFromBrowser());
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showIntroDialog, setShowIntroDialog] = useState(() => {
+    if (getLegalTabFromPathname(window.location.pathname)) {
+      return false;
+    }
     return localStorage.getItem('hasDismissedIntro') !== 'true';
   });
   const [isIntroFromMenu, setIsIntroFromMenu] = useState(false);
@@ -2614,9 +2635,45 @@ export default function App() {
     };
   }, []);
 
-  const t = { ...translations[currentLang], ...(installTranslations[currentLang] || {}) };
+  const legalLabels = legalMenuTranslations[currentLang] || legalMenuTranslations["English"];
+  const t = { ...translations[currentLang], ...(installTranslations[currentLang] || {}), ...legalLabels };
   const activeMessages = loadingMessages[currentLang] || loadingMessages["English"];
   const displayMessage = activeMessages[messageIndex % activeMessages.length];
+
+  const openLegalPage = (tab: LegalDocumentType) => {
+    const targetPath = tab === "privacy" ? "/privacy-policy" : "/terms-of-use";
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ legalTab: tab }, "", targetPath);
+    }
+    setActiveLegalTab(tab);
+  };
+
+  const closeLegalPage = () => {
+    if (window.location.pathname !== "/") {
+      window.history.pushState({}, "", "/");
+    }
+    setActiveLegalTab(null);
+  };
+
+  // Keep browser history navigation in sync with legal pages
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveLegalTab(getLegalTabFromPathname(window.location.pathname));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Update page title when viewing legal documents
+  useEffect(() => {
+    if (activeLegalTab === "privacy") {
+      document.title = "Privacy Policy | Pezeex";
+    } else if (activeLegalTab === "terms") {
+      document.title = "Terms of Use | Pezeex";
+    } else {
+      document.title = "Pezeex | Shopping Assistant";
+    }
+  }, [activeLegalTab]);
 
   // Sync document language and text direction attributes
   useEffect(() => {
@@ -2902,7 +2959,20 @@ export default function App() {
 
         {/* Center Logo */}
         <div className="flex shrink-0 items-center justify-center z-50">
-          <span className="text-foreground text-xl sm:text-2xl font-black tracking-[0.1em] sm:tracking-[0.15em] leading-none mb-[-2px] uppercase">Pezeex</span>
+          <a
+            href="/"
+            onClick={(e) => {
+              if (activeLegalTab) {
+                e.preventDefault();
+                closeLegalPage();
+              } else {
+                e.preventDefault();
+              }
+            }}
+            className="text-foreground text-xl sm:text-2xl font-black tracking-[0.1em] sm:tracking-[0.15em] leading-none mb-[-2px] uppercase hover:opacity-80 transition-opacity"
+          >
+            Pezeex
+          </a>
         </div>
 
         {/* End Section */}
@@ -2987,6 +3057,24 @@ export default function App() {
                         {t.dir === "ltr" && <Info className="text-blue-500" size={22} />}
                         <span className="text-lg font-medium group-hover:text-primary">{t.about}</span>
                         {t.dir === "rtl" && <Info className="text-blue-500" size={22} />}
+                      </SheetClose>
+
+                      <SheetClose 
+                        onClick={() => openLegalPage("privacy")}
+                        className={`w-full flex items-center gap-3 p-4 rounded-xl hover:bg-primary/5 transition-colors group ${t.dir === "rtl" ? "justify-end" : "justify-start"}`}
+                      >
+                        {t.dir === "ltr" && <ShieldCheck className="text-emerald-600 dark:text-emerald-400" size={22} />}
+                        <span className="text-lg font-medium group-hover:text-primary">{t.privacyPolicy}</span>
+                        {t.dir === "rtl" && <ShieldCheck className="text-emerald-600 dark:text-emerald-400" size={22} />}
+                      </SheetClose>
+
+                      <SheetClose 
+                        onClick={() => openLegalPage("terms")}
+                        className={`w-full flex items-center gap-3 p-4 rounded-xl hover:bg-primary/5 transition-colors group ${t.dir === "rtl" ? "justify-end" : "justify-start"}`}
+                      >
+                        {t.dir === "ltr" && <FileText className="text-muted-foreground" size={22} />}
+                        <span className="text-lg font-medium group-hover:text-primary">{t.termsOfUse}</span>
+                        {t.dir === "rtl" && <FileText className="text-muted-foreground" size={22} />}
                       </SheetClose>
 
                       <a 
@@ -3117,6 +3205,14 @@ export default function App() {
         </div>
       </header>
 
+      {activeLegalTab ? (
+        <LegalPage
+          activeTab={activeLegalTab}
+          onSelectTab={openLegalPage}
+          onBack={closeLegalPage}
+        />
+      ) : (
+      <>
       {/* Conversation Area */}
       <div className={`flex-1 w-full relative ${history.length > 0 ? "overflow-y-auto custom-scrollbar" : "overflow-hidden"}`}>
         <div className={`max-w-4xl mx-auto px-6 py-8 min-h-full flex flex-col ${history.length === 0 ? "justify-center" : "justify-start"}`}>
@@ -3471,11 +3567,35 @@ export default function App() {
                 {getDailySearchesLeftText(dailySearchUsage.remaining, currentLang)}
               </span>
             </span>
-            <span className="hidden sm:inline opacity-30">•</span>
+            <span className="hidden sm:inline opacity-30">·</span>
             <span>{t.aiDisclaimer}</span>
+            <span className="opacity-30" aria-hidden="true">·</span>
+            <a
+              href="/privacy-policy"
+              onClick={(e) => {
+                e.preventDefault();
+                openLegalPage("privacy");
+              }}
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
+            >
+              {t.privacyPolicy}
+            </a>
+            <span className="opacity-30" aria-hidden="true">·</span>
+            <a
+              href="/terms-of-use"
+              onClick={(e) => {
+                e.preventDefault();
+                openLegalPage("terms");
+              }}
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
+            >
+              {t.termsOfUse}
+            </a>
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* Manual Install Dialog */}
       <Dialog open={showInstallDialog} onOpenChange={(open) => !open && handleDismissInstall()}>
