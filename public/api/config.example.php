@@ -8,6 +8,10 @@
  * 
  * It supports ANY AI provider (Gemini, OpenAI, Groq, DeepSeek, Anthropic, OpenRouter, etc.)
  */
+if (PHP_SAPI !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === realpath(__FILE__)) {
+    http_response_code(403);
+    exit;
+}
 
 return [
     // Single key OR array of dozens/hundreds of keys (automatically rotated on every search):

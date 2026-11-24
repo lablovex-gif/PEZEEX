@@ -53,99 +53,162 @@ export async function getProductAlternativesStream(
   const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
     ? country.trim().toUpperCase()
     : "";
+  const streamEndpoints = ["/api/search-stream", "/api/search.php?stream=1"];
+  const streamPayload = JSON.stringify({
+    productName: safeProductName,
+    language: safeLanguage,
+    country: safeCountry,
+  });
+
   const streamAbort = new AbortController();
   const streamTimer = setTimeout(() => streamAbort.abort(), 65000);
   try {
-    const res = await fetch("/api/search-stream", {
-      method: "POST",
-      signal: streamAbort.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productName: safeProductName, language: safeLanguage, country: safeCountry }),
-    });
-
-    if (res.status === 429) {
-      const errData = await res.json().catch(() => ({}));
-      const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${res.status}`;
-      const err: any = new Error(detailedMessage);
-      err.status = res.status;
-      err.data = errData;
-      throw err;
-    }
-
-    const contentType = res.headers.get("content-type") || "";
-    if (res.ok && res.body && contentType.includes("text/event-stream")) {
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-      let totalChars = 0;
-      let latestResponse: ProductsResponse | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunkText = decoder.decode(value, { stream: true });
-        totalChars += chunkText.length;
-        if (totalChars > MAX_CLIENT_STREAM_CHARS) {
-          streamAbort.abort();
-          break;
+    for (const endpoint of streamEndpoints) {
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          signal: streamAbort.signal,
+          headers: { "Content-Type": "application/json" },
+          body: streamPayload,
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr?.name === "AbortError") {
+          const timeoutErr: any = new Error("Search request timed out. Please try again.");
+          timeoutErr.isTimeout = true;
+          timeoutErr.isStreamServerError = true;
+          throw timeoutErr;
         }
-        buffer += chunkText;
+        continue;
+      }
 
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
 
-        for (const evt of events) {
-          const lines = evt.split("\n");
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const rawPayload = trimmed.slice(5).trim();
-            if (!rawPayload) continue;
-            let parsed: any = null;
-            try {
-              parsed = JSON.parse(rawPayload);
-            } catch {
-              continue;
-            }
+      if (res.status === 429) {
+        const errData = await res.json().catch(() => ({}));
+        const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${res.status}`;
+        const err: any = new Error(detailedMessage);
+        err.status = res.status;
+        err.data = errData;
+        throw err;
+      }
 
-            if (parsed.type === "error") {
-              if (latestResponse && latestResponse.alternatives.length > 0) {
+      // If endpoint responded directly with JSON (error or complete result), handle immediately without a duplicate request
+      if (contentType.includes("application/json")) {
+        const data: any = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data?.alternatives)) {
+          const parsedRes: ProductsResponse = {
+            alternatives: sanitizeClientAlternatives(data.alternatives),
+            message: typeof data.message === "string" ? data.message.slice(0, 300) : undefined,
+          };
+          onBatch?.(parsedRes);
+          return parsedRes;
+        }
+        const detailedMessage = data.message || data.details || data.error || `HTTP error ${res.status}`;
+        const err: any = new Error(detailedMessage);
+        err.status = res.status;
+        err.data = data;
+        err.isTimeout = res.status === 504 || /timed?\s*out/i.test(String(detailedMessage));
+        err.isServerError = res.status >= 500;
+        err.isStreamServerError = true;
+        throw err;
+      }
+
+      if (res.ok && res.body && contentType.includes("text/event-stream")) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let totalChars = 0;
+        let latestResponse: ProductsResponse | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunkText = decoder.decode(value, { stream: true });
+          totalChars += chunkText.length;
+          if (totalChars > MAX_CLIENT_STREAM_CHARS) {
+            streamAbort.abort();
+            break;
+          }
+          buffer += chunkText;
+
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+
+          for (const evt of events) {
+            const lines = evt.split("\n");
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+              const rawPayload = trimmed.slice(5).trim();
+              if (!rawPayload) continue;
+              let parsed: any = null;
+              try {
+                parsed = JSON.parse(rawPayload);
+              } catch {
+                continue;
+              }
+
+              if (parsed.type === "error") {
+                if (latestResponse && latestResponse.alternatives.length > 0) {
+                  return latestResponse;
+                }
+                const errText =
+                  typeof parsed.details === "string"
+                    ? parsed.details
+                    : (typeof parsed.error === "string" ? parsed.error : "Search stream failed");
+                const streamErr: any = new Error(errText);
+                streamErr.isStreamServerError = true;
+                streamErr.isServerError = true;
+                streamErr.isTimeout = /timed?\s*out/i.test(errText);
+                throw streamErr;
+              }
+              const cleanMessage = typeof parsed.message === "string" ? parsed.message.slice(0, 300) : undefined;
+              if (parsed.type === "batch") {
+                latestResponse = {
+                  alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                  message: cleanMessage,
+                };
+                onBatch?.(latestResponse);
+              } else if (parsed.type === "done") {
+                latestResponse = {
+                  alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                  message: cleanMessage,
+                };
+                onBatch?.(latestResponse);
                 return latestResponse;
               }
-              const streamErr: any = new Error(
-                typeof parsed.details === "string"
-                  ? parsed.details
-                  : (typeof parsed.error === "string" ? parsed.error : "Search stream failed")
-              );
-              streamErr.isStreamServerError = true;
-              throw streamErr;
-            }
-            const cleanMessage = typeof parsed.message === "string" ? parsed.message.slice(0, 300) : undefined;
-            if (parsed.type === "batch") {
-              latestResponse = {
-                alternatives: sanitizeClientAlternatives(parsed.alternatives),
-                message: cleanMessage,
-              };
-              onBatch?.(latestResponse);
-            } else if (parsed.type === "done") {
-              latestResponse = {
-                alternatives: sanitizeClientAlternatives(parsed.alternatives),
-                message: cleanMessage,
-              };
-              onBatch?.(latestResponse);
-              return latestResponse;
             }
           }
         }
+
+        if (latestResponse && latestResponse.alternatives.length > 0) {
+          return latestResponse;
+        }
+        // Stream ended cleanly with no items; fall back once to standard endpoint
+        break;
       }
 
-      if (latestResponse && latestResponse.alternatives.length > 0) {
-        return latestResponse;
+      // If rewrite wasn't configured (HTML SPA fallback or 404), try next stream endpoint
+      if (res.status === 404 || contentType.includes("text/html")) {
+        continue;
+      }
+
+      if (res.status >= 500) {
+        const srvErr: any = new Error(
+          res.status === 504
+            ? "Search request timed out. Please try again."
+            : "Temporary server error while searching. Please try again."
+        );
+        srvErr.status = res.status;
+        srvErr.isServerError = true;
+        srvErr.isTimeout = res.status === 504;
+        srvErr.isStreamServerError = true;
+        throw srvErr;
       }
     }
   } catch (err: any) {
     if (err?.status === 429 || err?.isStreamServerError) throw err;
-    // Fallback to standard /api/search or PHP bridge only when SSE streaming itself is unavailable
     console.warn("Streaming search unavailable, falling back to /api/search", err?.message || err);
   } finally {
     clearTimeout(streamTimer);
@@ -195,11 +258,17 @@ export async function getProductAlternatives(
     for (const endpoint of candidateEndpoints) {
       try {
         const res = await fetch(endpoint, requestOptions);
-        if (res.status !== 404) {
+        const ct = (res.headers.get("content-type") || "").toLowerCase();
+        if (res.status !== 404 && !ct.includes("text/html")) {
           response = res;
           break;
         }
       } catch (err: any) {
+        if (err?.name === "AbortError") {
+          const timeoutErr: any = new Error("Search request timed out. Please try again.");
+          timeoutErr.isTimeout = true;
+          throw timeoutErr;
+        }
         if (!lastError) lastError = err;
       }
     }
@@ -218,6 +287,8 @@ export async function getProductAlternatives(
       const err: any = new Error(detailedMessage);
       err.status = response.status;
       err.data = errData;
+      err.isServerError = response.status >= 500;
+      err.isTimeout = response.status === 504 || /timed?\s*out/i.test(String(detailedMessage));
       throw err;
     }
 

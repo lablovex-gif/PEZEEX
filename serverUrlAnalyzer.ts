@@ -1,5 +1,8 @@
 import dns from "dns";
+import http from "http";
+import https from "https";
 import net from "net";
+import zlib from "zlib";
 
 export interface AnalyzedProductLink {
   originalUrl: string;
@@ -207,10 +210,16 @@ export function isPrivateOrInternalHost(hostname: string): boolean {
   return false;
 }
 
-export async function validatePublicUrlWithDns(
+export interface ValidatedPublicUrl {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+}
+
+export async function resolvePublicUrlWithDns(
   urlString: string,
   allowHttp: boolean = true
-): Promise<URL | null> {
+): Promise<ValidatedPublicUrl | null> {
   try {
     if (!urlString || typeof urlString !== "string" || urlString.length > 2048) return null;
     if (/[\u0000-\u001F\u007F\s]/.test(urlString.trim())) return null;
@@ -243,15 +252,28 @@ export async function validatePublicUrlWithDns(
     });
 
     if (!Array.isArray(records) || records.length === 0) return null;
+    let chosen: { address: string; family: 4 | 6 } | null = null;
     for (const rec of records) {
       if (!rec?.address || isPrivateOrReservedIp(rec.address)) {
         return null;
       }
+      if (!chosen || (chosen.family === 6 && rec.family === 4)) {
+        chosen = { address: rec.address, family: rec.family === 6 ? 6 : 4 };
+      }
     }
-    return parsed;
+    if (!chosen) return null;
+    return { url: parsed, address: chosen.address, family: chosen.family };
   } catch {
     return null;
   }
+}
+
+export async function validatePublicUrlWithDns(
+  urlString: string,
+  allowHttp: boolean = true
+): Promise<URL | null> {
+  const resolved = await resolvePublicUrlWithDns(urlString, allowHttp);
+  return resolved ? resolved.url : null;
 }
 
 function decodeHtmlEntities(input: string): string {
@@ -544,6 +566,128 @@ function extractMetadataFromHtml(html: string): {
   return { title, brand, price, description, category, siteName, canonicalUrl };
 }
 
+function pinnedSingleHopGet(
+  target: ValidatedPublicUrl,
+  signal: AbortSignal
+): Promise<{ statusCode: number; location: string; contentType: string; html: string }> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("Aborted"));
+      return;
+    }
+
+    const isHttps = target.url.protocol === "https:";
+    const mod = isHttps ? https : http;
+    const pinnedLookup: any = (_hostname: string, opts: any, cb: any) => {
+      const callback = typeof opts === "function" ? opts : cb;
+      if (opts && typeof opts === "object" && opts.all) {
+        callback(null, [{ address: target.address, family: target.family }]);
+      } else {
+        callback(null, target.address, target.family);
+      }
+    };
+
+    const reqOpts: https.RequestOptions = {
+      protocol: target.url.protocol,
+      hostname: target.url.hostname,
+      port: target.url.port ? Number(target.url.port) : isHttps ? 443 : 80,
+      path: `${target.url.pathname || "/"}${target.url.search || ""}`,
+      method: "GET",
+      lookup: pinnedLookup,
+      headers: {
+        Host: target.url.host,
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+      },
+      ...(isHttps ? { servername: target.url.hostname, rejectUnauthorized: true } : {}),
+    };
+
+    let settled = false;
+    const finish = (err: Error | null, result?: { statusCode: number; location: string; contentType: string; html: string }) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      if (err) reject(err);
+      else resolve(result!);
+    };
+
+    const req = mod.request(reqOpts, (res) => {
+      const statusCode = res.statusCode || 0;
+      const locationHeader = res.headers.location;
+      const location = Array.isArray(locationHeader) ? locationHeader[0] : (locationHeader || "");
+      const contentType = String(res.headers["content-type"] || "").toLowerCase();
+
+      if (statusCode >= 300 && statusCode < 400) {
+        res.destroy();
+        finish(null, { statusCode, location, contentType, html: "" });
+        return;
+      }
+
+      const isReadableText =
+        contentType.includes("text/html") ||
+        contentType.includes("application/xhtml+xml") ||
+        contentType.includes("text/plain") ||
+        contentType.includes("application/json");
+
+      if (statusCode < 200 || statusCode >= 300 || !isReadableText) {
+        res.destroy();
+        finish(null, { statusCode, location: "", contentType, html: "" });
+        return;
+      }
+
+      const enc = String(res.headers["content-encoding"] || "").toLowerCase();
+      let stream: NodeJS.ReadableStream = res;
+      if (enc === "gzip") {
+        stream = res.pipe(zlib.createGunzip());
+      } else if (enc === "deflate") {
+        stream = res.pipe(zlib.createInflate());
+      } else if (enc === "br") {
+        stream = res.pipe(zlib.createBrotliDecompress());
+      }
+
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+
+      stream.on("data", (chunk: Buffer) => {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = MAX_HTML_BYTES - totalBytes;
+        if (remaining <= 0) {
+          res.destroy();
+          finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
+          return;
+        }
+        const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
+        chunks.push(slice);
+        totalBytes += slice.length;
+        if (totalBytes >= MAX_HTML_BYTES) {
+          res.destroy();
+          finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
+        }
+      });
+
+      stream.on("end", () => {
+        finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
+      });
+
+      stream.on("error", () => {
+        finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
+      });
+    });
+
+    const onAbort = () => {
+      req.destroy(new Error("Aborted"));
+      finish(new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    req.on("error", (err) => finish(err));
+    req.end();
+  });
+}
+
 async function safeFetchPublicHtml(
   initialUrl: string,
   externalSignal?: AbortSignal
@@ -563,73 +707,26 @@ async function safeFetchPublicHtml(
     let currentUrl = initialUrl;
 
     for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-      const validated = await validatePublicUrlWithDns(currentUrl, true);
-      if (!validated) {
+      const resolved = await resolvePublicUrlWithDns(currentUrl, true);
+      if (!resolved) {
         return null;
       }
 
-      const res = await fetch(validated.toString(), {
-        method: "GET",
-        redirect: "manual",
-        credentials: "omit",
-        signal: controller.signal,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        },
-      });
+      const res = await pinnedSingleHopGet(resolved, controller.signal);
 
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get("location");
-        // Drain/cancel body to avoid leaking sockets
-        await res.body?.cancel().catch(() => {});
-        if (!loc || hop === MAX_REDIRECT_HOPS) {
-          return { finalUrl: validated.toString(), html: "" };
+      if (res.statusCode >= 300 && res.statusCode < 400) {
+        if (!res.location || hop === MAX_REDIRECT_HOPS) {
+          return { finalUrl: resolved.url.toString(), html: "" };
         }
         try {
-          currentUrl = new URL(loc, validated).toString();
+          currentUrl = new URL(res.location, resolved.url).toString();
         } catch {
-          return { finalUrl: validated.toString(), html: "" };
+          return { finalUrl: resolved.url.toString(), html: "" };
         }
         continue;
       }
 
-      const contentType = (res.headers.get("content-type") || "").toLowerCase();
-      const isReadableText =
-        contentType.includes("text/html") ||
-        contentType.includes("application/xhtml+xml") ||
-        contentType.includes("text/plain") ||
-        contentType.includes("application/json");
-
-      if (!res.ok || !res.body || !isReadableText) {
-        await res.body?.cancel().catch(() => {});
-        return { finalUrl: validated.toString(), html: "" };
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8", { fatal: false });
-      let totalBytes = 0;
-      let html = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-
-        const remaining = MAX_HTML_BYTES - totalBytes;
-        const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
-        totalBytes += slice.byteLength;
-        html += decoder.decode(slice, { stream: true });
-
-        if (totalBytes >= MAX_HTML_BYTES) {
-          await reader.cancel().catch(() => {});
-          break;
-        }
-      }
-      html += decoder.decode();
-      return { finalUrl: validated.toString(), html };
+      return { finalUrl: resolved.url.toString(), html: res.html };
     }
 
     return null;

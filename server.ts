@@ -64,26 +64,25 @@ app.use((req, res, next) => {
   next();
 });
 
-// Enforce strict same-origin and JSON content-type on state/quota-consuming POST /api/* endpoints
+// Enforce strict same-origin, Sec-Fetch-Site, and JSON content-type on state/quota-consuming POST /api/* endpoints
 app.use("/api", (req, res, next) => {
   if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE") {
     const contentType = String(req.headers["content-type"] || "").toLowerCase();
     if (!contentType.includes("application/json")) {
       return res.status(415).json({ error: "Content-Type must be application/json." });
     }
+    const secFetchSite = String(req.headers["sec-fetch-site"] || "").toLowerCase().trim();
+    if (secFetchSite === "cross-site") {
+      return res.status(403).json({ error: "Cross-site API request rejected." });
+    }
     const rawOrigin = req.headers.origin;
     if (typeof rawOrigin === "string" && rawOrigin.trim()) {
       try {
         const originUrl = new URL(rawOrigin.trim());
-        const forwardedHost = String(req.headers["x-forwarded-host"] || req.headers.host || "")
-          .split(",")[0]
-          .trim()
-          .toLowerCase();
-        const originHost = originUrl.host.toLowerCase();
+        const expectedHostname = (req.hostname || String(req.headers.host || "").split(":")[0]).toLowerCase().trim();
         const originHostname = originUrl.hostname.toLowerCase();
-        const expectedHostname = forwardedHost.split(":")[0];
         const isValidScheme = originUrl.protocol === "https:" || originUrl.protocol === "http:";
-        if (!isValidScheme || originUrl.username || originUrl.password || !expectedHostname || (originHost !== forwardedHost && originHostname !== expectedHostname)) {
+        if (!isValidScheme || originUrl.username || originUrl.password || !expectedHostname || originHostname !== expectedHostname) {
           return res.status(403).json({ error: "Cross-origin API request rejected." });
         }
       } catch {

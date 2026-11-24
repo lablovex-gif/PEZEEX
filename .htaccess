@@ -3,14 +3,22 @@
 # SetEnv GEMINI_API_KEY your_api_key_here
 # =============================================================
 
+# Disable directory browsing across all folders
+Options -Indexes
+
 DirectoryIndex index.html index.php
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. Route API requests directly to PHP scripts
+  # Block access to hidden directories like .git
+  RewriteRule (^|/)\.(?!well-known/) - [F,L]
+
+  # 1. Route API requests directly to PHP scripts (including live SSE streaming)
+  RewriteRule ^api/search-stream/?$ api/search.php?stream=1 [L,QSA]
   RewriteRule ^api/search/?$ api/search.php [L,QSA]
+  RewriteRule ^api/location/?$ api/location.php [L,QSA]
   RewriteRule ^api/health/?$ api/health.php [L,QSA]
 
   # 2. Standard Vite React Single Page Application (SPA) routing
@@ -20,12 +28,17 @@ DirectoryIndex index.html index.php
   RewriteRule . /index.html [L]
 </IfModule>
 
-# Block direct public access to sensitive config, env, and key files (LiteSpeed safe)
-<FilesMatch "^(\.env(\..*)?|\.keys|\.htaccess|config(\.example)?\.php|keys\.txt|server\.(cjs|ts)|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|bun\.lock|components\.json|metadata\.json)$">
+# Disable proxy/gzip buffering on live SSE search stream so batches flush immediately
+<IfModule mod_setenvif.c>
+  SetEnvIfNoCase Request_URI "^/api/search-stream" no-gzip=1 dont-vary=1
+</IfModule>
+
+# Block direct public access to sensitive config, env, key, backup, source, and build files (LiteSpeed safe)
+<FilesMatch "^(\.env(\..*)?|\.keys|\.htaccess|\.htpasswd|config(\.example)?\.php|keys\.txt|server\.(cjs|ts|js)|serverUrlAnalyzer\.ts|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|composer\.(json|lock)|bun\.lock|components\.json|metadata\.json|download_logos\.ts|updateTranslations\.js|test-litb\.js|add-reddit\.cjs)$|\.(log|bak|sql|sh|map|orig|swp)$">
   Require all denied
 </FilesMatch>
 
-# Security Headers
+# Security Headers (including HSTS on HTTPS and strict CSP)
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "SAMEORIGIN"
@@ -33,6 +46,8 @@ DirectoryIndex index.html index.php
   Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
   Header always set Cross-Origin-Opener-Policy "same-origin-allow-popups"
   Header always set X-Permitted-Cross-Domain-Policies "none"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self' https://convertlink.com https://*.convertlink.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://www.google.com https://icons.duckduckgo.com https://*.gstatic.com data: blob:; connect-src 'self' https://get.geojs.io https://convertlink.com https://*.convertlink.com; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self'"
 </IfModule>
 
 # MIME types

@@ -2823,16 +2823,28 @@ export default function App() {
         // keep cleanErrMsg
       }
 
+      const isTimeoutOrServerErr = Boolean(
+        error?.isTimeout ||
+        error?.isServerError ||
+        error?.name === "AbortError" ||
+        (typeof error?.status === "number" && error.status >= 500) ||
+        /timed?\s*out|unable to fetch|failed to fetch|network/i.test(cleanErrMsg)
+      );
+
       let userNotice = isRateLimitHit
         ? "لقد وصلت إلى الحد المسموح به لعمليات البحث (25 عملية بحث). يرجى المحاولة لاحقاً."
-        : (t.noResults || (currentLang === "العربية" ? "لم نتمكن من جلب البدائل حالياً. يرجى المحاولة مرة أخرى." : "Unable to fetch alternatives right now. Please try again."));
+        : isTimeoutOrServerErr
+          ? (currentLang === "العربية"
+              ? "حدث تأخر مؤقت في استجابة الخادم، يرجى إعادة المحاولة."
+              : "Temporary server delay or connection issue. Please try again.")
+          : (t.noResults || (currentLang === "العربية" ? "لم نتمكن من جلب البدائل حالياً. يرجى المحاولة مرة أخرى." : "Unable to fetch alternatives right now. Please try again."));
 
       if (!isRateLimitHit) {
         if (cleanErrMsg.toLowerCase().includes("api key") || cleanErrMsg.toLowerCase().includes("not configured")) {
           userNotice = currentLang === "العربية" 
             ? "تنبيه: لم يتم العثور على مفتاح الذكاء الاصطناعي على السيرفر. يرجى التأكد من ضبط المفتاح في المتغيرات البيئية."
             : "Notice: AI API Key is not configured. Please set an API key in your environment settings.";
-        } else if (cleanErrMsg && !cleanErrMsg.includes("404") && cleanErrMsg.length < 120) {
+        } else if (!isTimeoutOrServerErr && cleanErrMsg && !cleanErrMsg.includes("404") && cleanErrMsg.length < 120) {
           userNotice = `${userNotice} (${cleanErrMsg})`;
         }
       }
