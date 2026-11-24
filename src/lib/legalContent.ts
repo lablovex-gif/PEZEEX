@@ -108,9 +108,9 @@ export const legalUiLabels: LegalUiLabels = {
   essentialCookiesDesc: "Required for core site functionality, language selection, and theme preferences.",
   alwaysActive: "Always active",
   analyticsCookies: "Analytics Cookies",
-  analyticsCookiesDesc: "Help us understand traffic and improve Pezeex (e.g., Google Analytics).",
+  analyticsCookiesDesc: "Help us understand traffic and improve Pezeex (e.g., Google Tag Manager / Google Analytics).",
   affiliateCookies: "Affiliate & Personalisation Cookies",
-  affiliateCookiesDesc: "Used by affiliate partners to track discount code usage and personalise offers.",
+  affiliateCookiesDesc: "Used by affiliate partners (e.g., ConvertLink / Mitgo) to track product referrals and personalise offers.",
   savePreferences: "Save preferences",
   savedConfirmation: "Your cookie preferences have been saved.",
   acceptAll: "Accept all",
@@ -126,7 +126,7 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
     title: "Privacy Policy",
     effectiveDateLabel: "Effective Date",
     effectiveDate: SITE_LEGAL_INFO.effectiveDate,
-    intro: `${SITE_LEGAL_INFO.companyName} ("we", "us", or "our") is committed to protecting your privacy. This Privacy Policy outlines how we collect, use, and safeguard your information when you use our website ${SITE_LEGAL_INFO.domain} (the "Service").`,
+    intro: `${SITE_LEGAL_INFO.companyName} ("we", "us", or "our") is committed to protecting your privacy. This Privacy Policy outlines how we collect, use, and safeguard your information when you use our AI-powered shopping assistant website ${SITE_LEGAL_INFO.domain} (the "Service").`,
     sections: [
       {
         id: "privacy-info-collect",
@@ -134,16 +134,20 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         title: "What Information We Collect",
         bullets: [
           {
-            lead: "Personal Data",
-            text: "We may collect your name, email address, and preferences if you sign up for our newsletter or promotions.",
+            lead: "Search Queries & Product Links",
+            text: "Product names, descriptions, or URLs that you submit in our search bar so our AI can identify and suggest similar, lower-priced alternatives.",
           },
           {
-            lead: "Technical Data",
-            text: "Includes IP address, browser type, device information, and cookie data.",
+            lead: "Technical & Location Data",
+            text: "IP address (used to detect your approximate country so we can recommend relevant local stores), browser type, device information, and cookie data.",
           },
           {
-            lead: "Usage Data",
-            text: "Pages visited, click activity (e.g., clicking a promo code), time spent on site.",
+            lead: "Usage & Local Storage Data",
+            text: "Pages visited, click activity on product suggestions or affiliate links, and locally stored browser data (localStorage) such as your chosen language, theme mode, and daily search counter.",
+          },
+          {
+            lead: "Direct Communications",
+            text: "Your email address and message content if you choose to contact us directly by email.",
           },
         ],
       },
@@ -152,10 +156,10 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         number: "2",
         title: "How We Use Your Information",
         bullets: [
-          { text: "To provide access to discount codes and promotions" },
-          { text: "To personalise your user experience" },
-          { text: "To send newsletters and marketing communications (only with consent)" },
-          { text: "To analyse traffic and improve the Service" },
+          { text: "To process product queries using AI and suggest similar, more affordable product alternatives and deals" },
+          { text: "To tailor store suggestions to your approximate country and remember your language and display preferences" },
+          { text: "To enforce daily fair-usage limits and protect the security and stability of the Service" },
+          { text: "To analyse traffic, attribute affiliate referrals, and improve the Service" },
         ],
       },
       {
@@ -165,37 +169,60 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         paragraphs: ["We may share data with:"],
         bullets: [
           {
-            lead: "Affiliate partners",
-            text: "to track coupon usage and provide rewards",
+            lead: "AI service providers",
+            text: "to analyze the product names or links you search for and generate shopping alternatives",
           },
           {
-            lead: "Analytics services",
-            text: "(e.g., Google Analytics)",
+            lead: "Affiliate networks and partners",
+            text: "(e.g., ConvertLink, Mitgo, and third-party merchants) to track outbound clicks and attribute affiliate referrals",
           },
           {
-            lead: "Email marketing providers",
-            text: "(e.g., Mailchimp), if you've opted in",
+            lead: "Analytics and tag management services",
+            text: "(e.g., Google Tag Manager and Google Analytics) to measure site traffic and performance",
+          },
+          {
+            lead: "IP geolocation services",
+            text: "(e.g., GeoJS) to detect your approximate country for localized store recommendations",
           },
         ],
       },
       {
         id: "privacy-cookies",
         number: "4",
-        title: "Cookies",
+        title: "Cookies & Local Storage",
         paragraphs: [
-          "We use cookies and similar technologies to enhance your experience. You can manage your cookie preferences via your browser or our cookie settings below.",
+          "We use cookies, browser local storage (localStorage), and similar technologies to remember your language and theme settings, enforce daily search limits, measure traffic, and support affiliate tracking. You can manage your cookie preferences via your browser or our cookie settings below.",
         ],
         hasCookieControls: true,
       },
       {
         id: "privacy-rights",
         number: "5",
-        title: "Your Rights (under UK GDPR)",
+        title: "Your Privacy Rights (Europe & the Americas)",
+        paragraphs: [
+          "Depending on your region, you may exercise the following data protection rights under applicable laws in Europe and the Americas. We do not sell your personal information for monetary consideration.",
+        ],
         bullets: [
-          { text: "Access the data we hold about you" },
-          { text: "Request correction or deletion" },
-          { text: "Withdraw consent at any time" },
-          { text: "File a complaint with the UK ICO (Information Commissioner's Office)" },
+          {
+            lead: "Europe, UK & Switzerland (EU GDPR, UK GDPR & Swiss FADP)",
+            text: "You have the right to access, correct, or delete personal data we hold about you, restrict or object to processing, withdraw consent at any time, and lodge a complaint with your local data protection authority (such as an EU/EEA supervisory authority or the UK ICO).",
+          },
+          {
+            lead: "United States (CCPA / CPRA & Applicable State Laws)",
+            text: "You have the right to know what categories of data we collect and share, request deletion of personal information, opt out of the sharing of data for cross-context behavioral tracking, and not be discriminated against for exercising your privacy rights.",
+          },
+          {
+            lead: "Canada (PIPEDA & Provincial Privacy Laws)",
+            text: "You have the right to access your personal information, request corrections, withdraw consent to non-essential processing, and raise concerns with the Office of the Privacy Commissioner of Canada.",
+          },
+          {
+            lead: "Latin America (Brazil LGPD & Applicable Regional Laws)",
+            text: "You have the right to confirm the existence of data processing, access and correct your data, request anonymization or deletion where applicable, and revoke consent under Brazil's LGPD and similar Latin American privacy frameworks.",
+          },
+          {
+            lead: "International Data Transfers",
+            text: "Because Pezeex relies on international AI, analytics, and affiliate infrastructure, technical and search query data may be processed outside your country of residence using appropriate contractual and technical safeguards.",
+          },
         ],
       },
       {
@@ -219,7 +246,7 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
     title: "Terms of Use",
     effectiveDateLabel: "Effective Date",
     effectiveDate: SITE_LEGAL_INFO.effectiveDate,
-    intro: `Welcome to ${SITE_LEGAL_INFO.companyName}! These Terms of Use ("Terms") govern your use of our website ${SITE_LEGAL_INFO.domain} ("Service"), which provides digital coupons and promotional codes.`,
+    intro: `Welcome to ${SITE_LEGAL_INFO.companyName}! These Terms of Use ("Terms") govern your use of our website ${SITE_LEGAL_INFO.domain} ("Service"), an AI-powered shopping assistant that helps users discover similar, lower-priced product alternatives, deals, and promotional offers across third-party online stores.`,
     sections: [
       {
         id: "terms-acceptance",
@@ -234,7 +261,7 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         number: "2",
         title: "Service Description",
         paragraphs: [
-          "We offer discount codes and promotional offers sourced from third-party merchants and affiliate networks.",
+          "Pezeex uses artificial intelligence to analyze product names or links you submit and recommend similar, more affordable product alternatives, deals, and promotional offers sourced from third-party merchants and affiliate networks.",
         ],
       },
       {
@@ -242,7 +269,7 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         number: "3",
         title: "Accuracy of Information",
         paragraphs: [
-          "While we strive to ensure offers are valid and up-to-date, we do not guarantee the accuracy or availability of any offer. Merchants may change or discontinue offers at any time.",
+          "While we strive to ensure product suggestions, prices, and promotional offers are valid and up-to-date, AI-generated results may occasionally be inaccurate. We do not guarantee the accuracy, pricing, shipping terms, or availability of any product or offer. Merchants may change or discontinue listings and offers at any time.",
         ],
       },
       {
@@ -251,9 +278,9 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
         title: "User Conduct",
         paragraphs: ["You agree not to:"],
         bullets: [
-          { text: "Use bots or automated tools to scrape coupon codes" },
-          { text: "Attempt to hack, disrupt, or exploit the site" },
-          { text: "Post false or misleading user reviews (if applicable)" },
+          { text: "Use bots, scrapers, or automated tools to extract results or bypass daily search limits" },
+          { text: "Attempt to hack, disrupt, overload, or exploit the Service" },
+          { text: "Submit unlawful, harmful, or abusive content through the search interface" },
         ],
       },
       {
@@ -291,8 +318,11 @@ export const legalDocuments: Record<LegalDocumentType, LegalDocumentData> = {
       {
         id: "terms-law",
         number: "9",
-        title: "Governing Law",
-        paragraphs: ["These Terms are governed by the laws of England and Wales."],
+        title: "Applicable Law & Consumer Rights",
+        paragraphs: [
+          "These Terms apply to the fullest extent permitted by applicable law. Nothing in these Terms limits or excludes any mandatory consumer protection, privacy, or statutory rights that apply to you under the laws of your country or jurisdiction of residence, including applicable consumer protection laws across Europe (EU, EEA, UK, and Switzerland) and the Americas (the United States, Canada, and Latin America).",
+          "If any provision of these Terms is found to be invalid or unenforceable under mandatory local law, the remaining provisions shall continue in full force and effect.",
+        ],
       },
       {
         id: "terms-contact",
