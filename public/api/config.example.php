@@ -25,4 +25,8 @@ return [
     // Optional: Specify custom model or custom base URL if needed
     'AI_BASE_URL' => 'https://inference.dahl.global/v1',
     'AI_MODEL' => 'MiniMaxAI/MiniMax-M2.7',
+
+    // Takeads Server-to-Server Monetize API (Platform Public Key from Platform settings -> Platform API)
+    'TAKEADS_PUBLIC_KEY' => '',
+    'TAKEADS_SUB_ID' => 'pezeex',
 ];
