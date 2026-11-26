@@ -3,7 +3,7 @@ export type PageRouteKey = "home" | "about" | "contact" | "privacy" | "terms";
 export const SITE_URL = "https://pezeex.com";
 export const SITE_NAME = "Pezeex";
 export const CONTACT_EMAIL = "contact@pezeex.com";
-export const LAST_MODIFIED = "2026-11-25";
+export const LAST_MODIFIED = "2026-11-26";
 
 export const SAME_AS_PROFILES = [
   "https://www.instagram.com/itti_fc4321",

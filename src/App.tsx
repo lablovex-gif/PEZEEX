@@ -57,7 +57,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getProductAlternativesStream, ProductAlternative, ProductsResponse } from "./services/geminiService";
 import { motion, AnimatePresence } from "motion/react";
 import { installTranslations } from "./lib/installTranslations";
-import { LegalDocumentType, legalMenuTranslations, SITE_LEGAL_INFO } from "./lib/legalContent";
+import { LegalDocumentType, legalMenuTranslations } from "./lib/legalContent";
 import { LegalPage } from "./components/LegalPage";
 import { InfoPage } from "./components/InfoPage";
 import { bindWebMcpUiHandlers, registerWebMcpTools } from "./lib/webmcp";
@@ -3645,35 +3645,6 @@ export default function App() {
             </span>
             <span className="hidden sm:inline opacity-30" aria-hidden="true">·</span>
             <span>{t.aiDisclaimer}</span>
-            <span className="opacity-30" aria-hidden="true">·</span>
-            <a
-              href="/about"
-              onClick={(e) => {
-                e.preventDefault();
-                navigateToRoute("about");
-              }}
-              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
-            >
-              {t.about}
-            </a>
-            <span className="opacity-30" aria-hidden="true">·</span>
-            <a
-              href="/contact"
-              onClick={(e) => {
-                e.preventDefault();
-                navigateToRoute("contact");
-              }}
-              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
-            >
-              {t.contact}
-            </a>
-            <span className="opacity-30" aria-hidden="true">·</span>
-            <a
-              href={`mailto:${SITE_LEGAL_INFO.contactEmail}`}
-              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
-            >
-              {SITE_LEGAL_INFO.contactEmail}
-            </a>
             <span className="opacity-30" aria-hidden="true">·</span>
             <a
               href="/privacy-policy"
