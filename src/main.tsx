@@ -1,10 +1,11 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { registerWebMcpTools } from './lib/webmcp';
 
-// Enforce document title and daylight favicon immediately
-document.title = "Pezeex | Shopping Assistant";
+// Register WebMCP tools immediately on page load for in-browser AI agents
+registerWebMcpTools();
 
 try {
   const links = document.querySelectorAll("link[rel*='icon']");

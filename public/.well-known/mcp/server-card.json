@@ -1,0 +1,80 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+  "version": "1.0",
+  "protocolVersion": "2025-06-18",
+  "name": "pezeex-shopping-assistant",
+  "description": "AI-powered shopping assistant that discovers similar, lower-priced product alternatives across trusted global and regional online stores.",
+  "endpoint": "https://pezeex.com/api/mcp",
+  "serverInfo": {
+    "name": "pezeex-shopping-assistant",
+    "title": "Pezeex Shopping Assistant",
+    "version": "1.0.0",
+    "description": "AI-powered shopping assistant that discovers similar, lower-priced product alternatives across trusted global and regional online stores.",
+    "websiteUrl": "https://pezeex.com"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "endpoint": "https://pezeex.com/api/mcp"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://pezeex.com/api/mcp"
+    }
+  ],
+  "capabilities": {
+    "tools": {
+      "listChanged": false
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
+    },
+    "prompts": {
+      "listChanged": false
+    }
+  },
+  "authentication": {
+    "required": false
+  },
+  "tools": [
+    {
+      "name": "search_product_alternatives",
+      "description": "Find similar, lower-priced product alternatives across trusted online stores by product name or product URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Product name, model, or product URL to find cheaper alternatives for."
+          },
+          "country": {
+            "type": "string",
+            "description": "Two-letter ISO country code (e.g., US, SA, AE, GB, DE). Defaults to US."
+          },
+          "language": {
+            "type": "string",
+            "description": "Preferred response language (e.g., English, العربية). Defaults to English."
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_supported_countries",
+      "description": "Return the list of supported shopping countries, currencies, and popular retailers available on Pezeex.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "https://pezeex.com/llms.txt",
+      "name": "Pezeex LLMs Guide",
+      "description": "Structured directory of Pezeex pages and machine-readable endpoints.",
+      "mimeType": "text/plain"
+    }
+  ]
+}

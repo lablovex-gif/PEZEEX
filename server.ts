@@ -17,6 +17,20 @@ import {
   isTakeadsConfigured,
   TakeadsPromptGuidance,
 } from "./serverTakeads";
+import {
+  ROBOTS_TXT,
+  SITEMAP_XML,
+  LLMS_TXT,
+  MCP_SERVER_CARD,
+  resolveKnownPageRoute,
+  resolveMarkdownFileRoute,
+  prefersMarkdown,
+  getLinkHeader,
+  getPageMarkdown,
+  applyPageTemplate,
+  get404Html,
+  get404Markdown,
+} from "./serverAgentReady";
 
 dotenv.config();
 
@@ -27,7 +41,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 
 const BLOCKED_STATIC_FILE_PATTERN =
-  /(?:^|\/)(?:\.env(?:\.[^/]+)?|\.keys|keys\.txt|\.htaccess|config(?:\.example)?\.php|server\.(?:ts|cjs|js)|package(?:-lock)?\.json|bun\.lock|metadata\.json|tsconfig\.json|vite\.config\.ts)$|\.php(?:\/|$)/i;
+  /(?:^|\/)(?:\.env(?:\.[^/]+)?|\.keys|keys\.txt|\.htaccess|config(?:\.example)?\.php|server(?:AgentReady|Takeads|UrlAnalyzer)?\.(?:ts|cjs|js)|package(?:-lock)?\.json|bun\.lock|metadata\.json|tsconfig\.json|vite\.config\.ts)$|\.php(?:\/|$)/i;
 
 // Security headers and sensitive-path protection for all responses
 app.use((req, res, next) => {
@@ -72,6 +86,16 @@ app.use((req, res, next) => {
 
 // Enforce strict same-origin, Sec-Fetch-Site, and JSON content-type on state/quota-consuming POST /api/* endpoints
 app.use("/api", (req, res, next) => {
+  // Allow public MCP JSON-RPC requests to /api/mcp (still enforces JSON content-type and search rate limits)
+  if (req.path === "/mcp") {
+    if (req.method === "POST") {
+      const contentType = String(req.headers["content-type"] || "").toLowerCase();
+      if (!contentType.includes("application/json")) {
+        return res.status(415).json({ error: "Content-Type must be application/json." });
+      }
+    }
+    return next();
+  }
   if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE") {
     const contentType = String(req.headers["content-type"] || "").toLowerCase();
     if (!contentType.includes("application/json")) {
@@ -2315,31 +2339,320 @@ app.post("/api/search", async (req, res) => {
   }
 });
 
+// =========================================================================
+// Agent-Readiness Endpoints: robots.txt, sitemap.xml, llms.txt, Markdown,
+// SEP-1649 MCP Server Card, and Streamable HTTP MCP JSON-RPC 2.0 Server
+// =========================================================================
+
+app.get("/robots.txt", (_req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  return res.status(200).send(ROBOTS_TXT);
+});
+
+app.get("/sitemap.xml", (_req, res) => {
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  return res.status(200).send(SITEMAP_XML);
+});
+
+app.get("/llms.txt", (_req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).send(LLMS_TXT);
+});
+
+app.get("/.well-known/mcp/server-card.json", (_req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).json(MCP_SERVER_CARD);
+});
+
+app.get(["/index.md", "/about.md", "/contact.md", "/privacy-policy.md", "/privacy.md", "/terms-of-use.md", "/terms.md"], (req, res) => {
+  const routeKey = resolveMarkdownFileRoute(req.path);
+  if (!routeKey) {
+    return res.status(404).type("text/markdown; charset=utf-8").send(get404Markdown(req.path));
+  }
+  const md = getPageMarkdown(routeKey);
+  res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+  res.setHeader("Vary", "Accept");
+  res.setHeader("Link", getLinkHeader(routeKey));
+  res.setHeader("Cache-Control", "public, max-age=300");
+  return res.status(200).send(md);
+});
+
+app.options("/api/mcp", (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id");
+  return res.status(204).end();
+});
+
+app.get("/api/mcp", (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).json({
+    name: MCP_SERVER_CARD.name,
+    version: MCP_SERVER_CARD.serverInfo.version,
+    protocolVersion: MCP_SERVER_CARD.protocolVersion,
+    serverCard: "https://pezeex.com/.well-known/mcp/server-card.json",
+    transport: "streamable-http",
+    message: "Send JSON-RPC 2.0 POST requests to this endpoint.",
+  });
+});
+
+app.post("/api/mcp", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600, message: "Invalid JSON-RPC request." },
+    });
+  }
+
+  const { id = null, method, params } = body as { id?: string | number | null; method?: string; params?: Record<string, any> };
+
+  if (method === "notifications/initialized") {
+    return res.status(202).end();
+  }
+
+  if (method === "ping") {
+    return res.status(200).json({ jsonrpc: "2.0", id, result: {} });
+  }
+
+  if (method === "initialize") {
+    return res.status(200).json({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: MCP_SERVER_CARD.protocolVersion,
+        capabilities: MCP_SERVER_CARD.capabilities,
+        serverInfo: MCP_SERVER_CARD.serverInfo,
+      },
+    });
+  }
+
+  if (method === "tools/list") {
+    return res.status(200).json({
+      jsonrpc: "2.0",
+      id,
+      result: { tools: MCP_SERVER_CARD.tools },
+    });
+  }
+
+  if (method === "resources/list") {
+    return res.status(200).json({
+      jsonrpc: "2.0",
+      id,
+      result: { resources: MCP_SERVER_CARD.resources },
+    });
+  }
+
+  if (method === "resources/read") {
+    const uri = typeof params?.uri === "string" ? params.uri : "";
+    if (uri === "https://pezeex.com/llms.txt" || uri === "/llms.txt") {
+      return res.status(200).json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          contents: [
+            {
+              uri: "https://pezeex.com/llms.txt",
+              mimeType: "text/plain",
+              text: LLMS_TXT,
+            },
+          ],
+        },
+      });
+    }
+    return res.status(200).json({
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32002, message: "Resource not found." },
+    });
+  }
+
+  if (method === "tools/call") {
+    const toolName = typeof params?.name === "string" ? params.name : "";
+    const args = params?.arguments && typeof params.arguments === "object" ? params.arguments : {};
+
+    if (toolName === "get_supported_countries") {
+      const countries = Object.values(COUNTRY_METADATA).map((c) => ({
+        code: c.code,
+        name: c.nameEn,
+        currency: c.currency,
+        popularStores: c.popularStores,
+      }));
+      return res.status(200).json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: JSON.stringify({ countries }, null, 2) }],
+        },
+      });
+    }
+
+    if (toolName === "search_product_alternatives") {
+      const clientIp = getClientIp(req);
+      if (!checkBurstLimit(clientIp)) {
+        return res.status(429).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32029, message: "Rate limit exceeded. Please wait a moment." },
+        });
+      }
+      const rawQuery = typeof args.query === "string" ? args.query : "";
+      if (rawQuery.trim().length > MAX_SEARCH_QUERY_LENGTH) {
+        return res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            isError: true,
+            content: [{ type: "text", text: `Query must not exceed ${MAX_SEARCH_QUERY_LENGTH} characters.` }],
+          },
+        });
+      }
+      const cleanQuery = sanitizeSearchInput(rawQuery);
+      if (!cleanQuery) {
+        return res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            isError: true,
+            content: [{ type: "text", text: "A non-empty product query or URL is required." }],
+          },
+        });
+      }
+
+      const quota = checkAndConsumeSearchQuota(clientIp);
+      if (!quota.allowed) {
+        return res.status(429).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32029, message: "Daily search quota exceeded (25 searches/day)." },
+        });
+      }
+
+      const cleanLanguage = sanitizeLanguageInput(args.language || "English");
+      const cleanCountry = sanitizeCountryInput(args.country) || detectCountryFromRequest(req) || "US";
+
+      try {
+        const result = await runStreamingSearch(cleanQuery, cleanLanguage, cleanCountry);
+        return res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          },
+        });
+      } catch (err: any) {
+        return res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            isError: true,
+            content: [{ type: "text", text: getSafePublicErrorMessage(err) }],
+          },
+        });
+      }
+    }
+
+    return res.status(200).json({
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32601, message: `Unknown tool: ${toolName}` },
+    });
+  }
+
+  return res.status(200).json({
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32601, message: `Method not found: ${String(method || "")}` },
+  });
+});
+
 async function startServer() {
+  let vite: Awaited<ReturnType<typeof createViteServer>> | null = null;
+  let prodIndexTemplate = "";
+
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: { middlewareMode: true, host: "0.0.0.0", port: 3000 },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
+    prodIndexTemplate = fs.readFileSync(path.join(distPath, "index.html"), "utf-8");
     app.use(express.static(distPath, {
+      index: false,
       dotfiles: "deny",
       maxAge: "1y",
       immutable: true,
       setHeaders: (res, filePath) => {
         if (filePath.endsWith(".html")) {
-          // Do not cache HTML so updates are immediate
           res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         }
-      }
+      },
     }));
-    app.get("*", (req, res) => {
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
+
+  // Known page routes (with SSR fallback, Markdown Accept negotiation, and RFC 8288 Link headers) + real HTTP 404s
+  app.use(async (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "API endpoint not found." });
+      }
+      return res.status(404).type("text/plain; charset=utf-8").send("404 Not Found");
+    }
+
+    if (req.path.startsWith("/api/")) {
+      return res.status(404).json({ error: "API endpoint not found." });
+    }
+
+    const routeKey = resolveKnownPageRoute(req.path);
+    const acceptHeader = typeof req.headers.accept === "string" ? req.headers.accept : "";
+
+    if (!routeKey) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      if (prefersMarkdown(acceptHeader)) {
+        res.setHeader("Vary", "Accept");
+        return res.status(404).type("text/markdown; charset=utf-8").send(get404Markdown(req.path));
+      }
+      if (acceptHeader.includes("application/json") && !acceptHeader.includes("text/html")) {
+        return res.status(404).json({ error: "Not found", path: req.path });
+      }
+      return res.status(404).type("text/html; charset=utf-8").send(get404Html(req.path));
+    }
+
+    res.setHeader("Vary", "Accept");
+    res.setHeader("Link", getLinkHeader(routeKey));
+
+    if (prefersMarkdown(acceptHeader)) {
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.status(200).type("text/markdown; charset=utf-8").send(getPageMarkdown(routeKey));
+    }
+
+    try {
+      let baseTemplate = prodIndexTemplate;
+      if (vite) {
+        baseTemplate = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf-8");
+      }
+      let html = applyPageTemplate(baseTemplate, routeKey);
+      if (vite) {
+        html = await vite.transformIndexHtml(req.originalUrl, html);
+      }
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      return res.status(200).type("text/html; charset=utf-8").send(html);
+    } catch (err) {
+      return next(err);
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);

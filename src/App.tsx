@@ -57,8 +57,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getProductAlternativesStream, ProductAlternative, ProductsResponse } from "./services/geminiService";
 import { motion, AnimatePresence } from "motion/react";
 import { installTranslations } from "./lib/installTranslations";
-import { LegalDocumentType, legalMenuTranslations } from "./lib/legalContent";
+import { LegalDocumentType, legalMenuTranslations, SITE_LEGAL_INFO } from "./lib/legalContent";
 import { LegalPage } from "./components/LegalPage";
+import { InfoPage } from "./components/InfoPage";
+import { bindWebMcpUiHandlers, registerWebMcpTools } from "./lib/webmcp";
 
 const RedditIcon = ({ size = 24 }: { size?: number }) => (
   <svg
@@ -2450,22 +2452,51 @@ function inferCountryFromBrowser(): string {
 
 const MAX_SEARCH_CHARS = 1500;
 
-function getLegalTabFromPathname(pathname: string): LegalDocumentType | null {
+type AppRoute = "home" | "about" | "contact" | "privacy" | "terms";
+
+function getAppRouteFromPathname(pathname: string): AppRoute {
   const normalized = pathname.toLowerCase().replace(/\/+$/, "");
+  if (normalized === "/about") return "about";
+  if (normalized === "/contact") return "contact";
   if (normalized === "/privacy" || normalized === "/privacy-policy") {
     return "privacy";
   }
   if (normalized === "/terms" || normalized === "/terms-of-use") {
     return "terms";
   }
-  return null;
+  return "home";
+}
+
+function getPathForRoute(route: AppRoute): string {
+  switch (route) {
+    case "about":
+      return "/about";
+    case "contact":
+      return "/contact";
+    case "privacy":
+      return "/privacy-policy";
+    case "terms":
+      return "/terms-of-use";
+    case "home":
+    default:
+      return "/";
+  }
 }
 
 export default function App() {
-  const [activeLegalTab, setActiveLegalTab] = useState<LegalDocumentType | null>(() =>
-    getLegalTabFromPathname(window.location.pathname)
+  const [activeRoute, setActiveRoute] = useState<AppRoute>(() =>
+    getAppRouteFromPathname(window.location.pathname)
   );
-  const [searchQuery, setSearchQuery] = useState("");
+  const activeLegalTab: LegalDocumentType | null =
+    activeRoute === "privacy" || activeRoute === "terms" ? activeRoute : null;
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get("q");
+      return q ? q.slice(0, MAX_SEARCH_CHARS) : "";
+    } catch {
+      return "";
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [dailySearchUsage, setDailySearchUsage] = useState<ClientDailyUsage>(() => getClientDailySearch());
   const [showLimitDialog, setShowLimitDialog] = useState(false);
@@ -2479,7 +2510,7 @@ export default function App() {
   const [userCountry, setUserCountry] = useState<string>(() => inferCountryFromBrowser());
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showIntroDialog, setShowIntroDialog] = useState(() => {
-    if (getLegalTabFromPathname(window.location.pathname)) {
+    if (getAppRouteFromPathname(window.location.pathname) !== "home") {
       return false;
     }
     return localStorage.getItem('hasDismissedIntro') !== 'true';
@@ -2640,40 +2671,75 @@ export default function App() {
   const activeMessages = loadingMessages[currentLang] || loadingMessages["English"];
   const displayMessage = activeMessages[messageIndex % activeMessages.length];
 
-  const openLegalPage = (tab: LegalDocumentType) => {
-    const targetPath = tab === "privacy" ? "/privacy-policy" : "/terms-of-use";
+  const navigateToRoute = (route: AppRoute) => {
+    const targetPath = getPathForRoute(route);
     if (window.location.pathname !== targetPath) {
-      window.history.pushState({ legalTab: tab }, "", targetPath);
+      window.history.pushState({ route }, "", targetPath);
     }
-    setActiveLegalTab(tab);
+    setActiveRoute(route);
+    if (route !== "home") {
+      setShowIntroDialog(false);
+    }
+  };
+
+  const openLegalPage = (tab: LegalDocumentType) => {
+    navigateToRoute(tab);
   };
 
   const closeLegalPage = () => {
-    if (window.location.pathname !== "/") {
-      window.history.pushState({}, "", "/");
-    }
-    setActiveLegalTab(null);
+    navigateToRoute("home");
   };
 
-  // Keep browser history navigation in sync with legal pages
+  // Keep browser history navigation in sync with app pages
   useEffect(() => {
     const handlePopState = () => {
-      setActiveLegalTab(getLegalTabFromPathname(window.location.pathname));
+      setActiveRoute(getAppRouteFromPathname(window.location.pathname));
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Update page title when viewing legal documents
+  // Register and bind WebMCP tools for in-browser AI agents
   useEffect(() => {
-    if (activeLegalTab === "privacy") {
-      document.title = "Privacy Policy | Pezeex";
-    } else if (activeLegalTab === "terms") {
-      document.title = "Terms of Use | Pezeex";
-    } else {
-      document.title = "Pezeex | Shopping Assistant";
+    registerWebMcpTools();
+    return bindWebMcpUiHandlers({
+      onNavigate: (page) => {
+        if (page === "privacy-policy") navigateToRoute("privacy");
+        else if (page === "terms-of-use") navigateToRoute("terms");
+        else navigateToRoute(page);
+      },
+      onSearchResults: (query, result) => {
+        navigateToRoute("home");
+        setHistory([
+          { type: "user", content: query },
+          {
+            type: "ai",
+            content: {
+              message: typeof result.message === "string" ? result.message : undefined,
+              alternatives: Array.isArray(result.alternatives) ? (result.alternatives as ProductAlternative[]) : [],
+            },
+          },
+        ]);
+      },
+    });
+  }, []);
+
+  // Update page title and canonical link when navigating between routes
+  useEffect(() => {
+    const routeTitles: Record<AppRoute, string> = {
+      home: "Pezeex | AI Shopping Assistant for Cheaper Alternatives",
+      about: "About Pezeex | AI Shopping Assistant",
+      contact: "Contact Pezeex | Support & Inquiries",
+      privacy: "Privacy Policy | Pezeex",
+      terms: "Terms of Use | Pezeex",
+    };
+    document.title = routeTitles[activeRoute];
+    const canonicalEl = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (canonicalEl) {
+      const path = getPathForRoute(activeRoute);
+      canonicalEl.href = `https://pezeex.com${path}`;
     }
-  }, [activeLegalTab]);
+  }, [activeRoute]);
 
   // Sync document language and text direction attributes
   useEffect(() => {
@@ -2962,11 +3028,9 @@ export default function App() {
           <a
             href="/"
             onClick={(e) => {
-              if (activeLegalTab) {
-                e.preventDefault();
-                closeLegalPage();
-              } else {
-                e.preventDefault();
+              e.preventDefault();
+              if (activeRoute !== "home") {
+                navigateToRoute("home");
               }
             }}
             className="text-foreground text-xl sm:text-2xl font-black tracking-[0.1em] sm:tracking-[0.15em] leading-none mb-[-2px] uppercase hover:opacity-80 transition-opacity"
@@ -3211,10 +3275,15 @@ export default function App() {
           onSelectTab={openLegalPage}
           onBack={closeLegalPage}
         />
+      ) : activeRoute === "about" || activeRoute === "contact" ? (
+        <InfoPage
+          page={activeRoute}
+          onNavigate={navigateToRoute}
+        />
       ) : (
       <>
       {/* Conversation Area */}
-      <div className={`flex-1 w-full relative ${history.length > 0 ? "overflow-y-auto custom-scrollbar" : "overflow-hidden"}`}>
+      <main className={`flex-1 w-full relative ${history.length > 0 ? "overflow-y-auto custom-scrollbar" : "overflow-hidden"}`}>
         <div className={`max-w-4xl mx-auto px-6 py-8 min-h-full flex flex-col ${history.length === 0 ? "justify-center" : "justify-start"}`}>
           {history.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center">
@@ -3223,7 +3292,7 @@ export default function App() {
                 animate={{ opacity: 1, scale: 1 }}
                 className="w-28 h-28 flex items-center justify-center text-foreground mb-6"
               >
-                <svg viewBox="-20 -20 340 340" className="w-full h-full text-foreground drop-shadow-sm" xmlns="http://www.w3.org/2000/svg">
+                <svg viewBox="-20 -20 340 340" className="w-full h-full text-foreground drop-shadow-sm" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                   <defs>
                     <mask id="tag-cut-2">
                       <rect x="-50" y="-50" width="400" height="400" fill="white" />
@@ -3254,13 +3323,14 @@ export default function App() {
                   </g>
                 </svg>
               </motion.div>
-              <h2 className="text-3xl sm:text-4xl font-extrabold mb-3 sm:mb-4 tracking-tight text-foreground">{t.welcome}</h2>
+              <h1 className="text-3xl sm:text-4xl font-extrabold mb-3 sm:mb-4 tracking-tight text-foreground">{t.welcome}</h1>
               <p className="text-muted-foreground text-lg sm:text-xl max-w-lg leading-relaxed">
                 {t.description}
               </p>
             </div>
           ) : (
             <div className="flex flex-col gap-8 justify-start h-full">
+              <h1 className="sr-only">Pezeex — AI Shopping Assistant</h1>
               {history.map((msg, i) => (
                 <motion.div 
                   key={i}
@@ -3296,9 +3366,9 @@ export default function App() {
                             return (
                               <div className="flex flex-col gap-4 mt-2">
                                 {sectionTitle && (
-                                  <h3 className={`font-bold text-xl mb-1 text-foreground flex items-center gap-2 ${t.dir === "rtl" ? "text-right" : "text-left"}`}>
+                                  <h2 className={`font-bold text-xl mb-1 text-foreground flex items-center gap-2 ${t.dir === "rtl" ? "text-right" : "text-left"}`}>
                                     {sectionTitle}
-                                  </h3>
+                                  </h2>
                                 )}
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4">
                                   {items.map((item, idx) => {
@@ -3355,9 +3425,9 @@ export default function App() {
                                               )}
                                             </div>
 
-                                            <h4 className={`text-[10px] sm:text-[11px] font-semibold leading-tight line-clamp-2 text-foreground/90 tracking-tight ${t.dir === "rtl" ? "text-right font-medium" : "text-left"}`}>
+                                            <h3 className={`text-[10px] sm:text-[11px] font-semibold leading-tight line-clamp-2 text-foreground/90 tracking-tight ${t.dir === "rtl" ? "text-right font-medium" : "text-left"}`}>
                                               {item.name}
-                                            </h4>
+                                            </h3>
                                           </div>
                                         </div>
 
@@ -3489,10 +3559,10 @@ export default function App() {
             </div>
           )}
         </div>
-      </div>
+      </main>
 
       {/* Bottom Input Area */}
-      <div className="w-full p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent shrink-0">
+      <footer className="w-full p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent shrink-0">
         <div className="max-w-4xl mx-auto">
           {dailySearchUsage.isLimitReached && (
             <motion.div
@@ -3519,12 +3589,17 @@ export default function App() {
             onSubmit={handleSearch}
             autoComplete="off"
             noValidate
+            toolname="search_product_alternatives"
+            tooldescription="Search Pezeex for similar, lower-priced product alternatives across trusted online stores by product name or product URL."
             className="relative group"
           >
             <Input 
               id="pezeex-search-input"
-              name="pezeex_search_field"
+              name="query"
               type="text"
+              aria-label={t.placeholder}
+              toolparamtitle="Product Query or URL"
+              toolparamdescription="Product name, model number, or store product URL to find cheaper alternatives for."
               maxLength={MAX_SEARCH_CHARS}
               autoComplete="off"
               autoCorrect="off"
@@ -3548,6 +3623,7 @@ export default function App() {
             </div>
             <Button 
               type="submit"
+              aria-label={t.search}
               disabled={loading || !searchQuery.trim()}
               className={`absolute top-1/2 -translate-y-1/2 h-10 w-10 p-0 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg disabled:opacity-50 disabled:bg-primary/30 ${t.dir === "rtl" ? "left-2" : "right-2"}`}
             >
@@ -3561,14 +3637,43 @@ export default function App() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground mt-2.5">
+          <nav aria-label="Footer" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground mt-2.5">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-primary/5 border border-primary/10 select-none">
               <span className="font-medium">
                 {getDailySearchesLeftText(dailySearchUsage.remaining, currentLang)}
               </span>
             </span>
-            <span className="hidden sm:inline opacity-30">·</span>
+            <span className="hidden sm:inline opacity-30" aria-hidden="true">·</span>
             <span>{t.aiDisclaimer}</span>
+            <span className="opacity-30" aria-hidden="true">·</span>
+            <a
+              href="/about"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateToRoute("about");
+              }}
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
+            >
+              {t.about}
+            </a>
+            <span className="opacity-30" aria-hidden="true">·</span>
+            <a
+              href="/contact"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateToRoute("contact");
+              }}
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
+            >
+              {t.contact}
+            </a>
+            <span className="opacity-30" aria-hidden="true">·</span>
+            <a
+              href={`mailto:${SITE_LEGAL_INFO.contactEmail}`}
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors whitespace-nowrap"
+            >
+              {SITE_LEGAL_INFO.contactEmail}
+            </a>
             <span className="opacity-30" aria-hidden="true">·</span>
             <a
               href="/privacy-policy"
@@ -3591,9 +3696,9 @@ export default function App() {
             >
               {t.termsOfUse}
             </a>
-          </div>
+          </nav>
         </div>
-      </div>
+      </footer>
       </>
       )}
 

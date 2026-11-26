@@ -1,0 +1,7 @@
+# Pezeex Robots & Content Signals Policy
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+Allow: /
+Disallow: /api/
+
+Sitemap: https://pezeex.com/sitemap.xml

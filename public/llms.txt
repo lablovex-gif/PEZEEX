@@ -1,0 +1,29 @@
+# Pezeex
+
+> Pezeex is an AI-powered shopping assistant that finds similar, lower-priced product alternatives across trusted global and regional online stores.
+
+Enter any product name or paste a product link to discover more affordable alternatives tailored to your country, currency, and preferred language. Pezeex supports 25+ countries and 37 languages with up to 25 free searches per day.
+
+## Key Pages
+
+- [Home](https://pezeex.com/): Interactive AI shopping assistant for searching cheaper product alternatives by name or URL.
+- [About Pezeex](https://pezeex.com/about): Overview of how Pezeex works, supported shopping regions, and affiliate transparency.
+- [Contact Us](https://pezeex.com/contact): Direct email support at contact@pezeex.com and official social channels.
+- [Privacy Policy](https://pezeex.com/privacy-policy): Information collected, cookies, GDPR/CCPA/PIPEDA/LGPD rights, and data retention.
+- [Terms of Use](https://pezeex.com/terms-of-use): Terms governing use of pezeex.com, AI accuracy notice, and affiliate disclosure.
+
+## Agent & Machine-Readable Resources
+
+- [Homepage in Markdown](https://pezeex.com/index.md): Token-efficient Markdown version of the homepage (also returned at `/` when requesting `Accept: text/markdown`).
+- [About in Markdown](https://pezeex.com/about.md): Markdown version of the About page.
+- [Contact in Markdown](https://pezeex.com/contact.md): Markdown version of the Contact page.
+- [MCP Server Card](https://pezeex.com/.well-known/mcp/server-card.json): SEP-1649 Model Context Protocol discovery card for Pezeex.
+- [MCP Endpoint](https://pezeex.com/api/mcp): Streamable HTTP JSON-RPC 2.0 MCP endpoint exposing `search_product_alternatives` and `get_supported_countries`.
+- [XML Sitemap](https://pezeex.com/sitemap.xml): Machine-readable index of all public pages.
+
+## Contact & Official Profiles
+
+- Email: [contact@pezeex.com](mailto:contact@pezeex.com)
+- Instagram: [https://www.instagram.com/itti_fc4321](https://www.instagram.com/itti_fc4321)
+- Reddit: [https://www.reddit.com/user/ExternalAd2358](https://www.reddit.com/user/ExternalAd2358)
+- Support Pezeex: [https://paypal.me/AbdullahAlbukhari37](https://paypal.me/AbdullahAlbukhari37)
