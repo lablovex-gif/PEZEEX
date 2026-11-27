@@ -20,9 +20,13 @@ export interface ProductsResponse {
 
 const MAX_CLIENT_STREAM_CHARS = 256 * 1024;
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function sanitizeClientAlternatives(rawList: unknown): ProductAlternative[] {
   if (!Array.isArray(rawList)) return [];
-  return rawList
+  const mapped = rawList
     .slice(0, 18)
     .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
     .map((item) => ({
@@ -37,9 +41,44 @@ function sanitizeClientAlternatives(rawList: unknown): ProductAlternative[] {
       storeDomain: typeof item.storeDomain === "string" ? item.storeDomain.slice(0, 120) : undefined,
       logoUrl: typeof item.logoUrl === "string" ? item.logoUrl.slice(0, 300) : undefined,
       searchKey: typeof item.searchKey === "string" ? item.searchKey.slice(0, 120) : undefined,
-      isPromo: false,
+      isPromo: Boolean(item.isPromo),
     }))
     .filter((item) => item.name.length > 0 && item.store.length > 0);
+
+  const seenStores = new Set<string>();
+  const deduped: ProductAlternative[] = [];
+  for (const item of mapped) {
+    const storeKey = (item.storeDomain || item.store).toLowerCase().trim().replace(/^www\./, "");
+    if (!storeKey || seenStores.has(storeKey)) continue;
+    seenStores.add(storeKey);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function isMissingApiRouteJson(status: number, data: any): boolean {
+  if (status !== 404 || !data || typeof data !== "object") return false;
+  const errStr = String(data.error || "").toLowerCase().trim();
+  return errStr === "api endpoint not found." || errStr === "not found";
+}
+
+function buildHttpApiError(status: number, statusText: string, data: any, isStreamServerError: boolean): Error {
+  const detailedMessage =
+    (data && typeof data === "object" && (data.message || data.details || data.error)) ||
+    (status === 504
+      ? "Search request timed out. Please try again."
+      : status >= 500
+        ? "Temporary server error while searching. Please try again."
+        : `HTTP error ${status}: ${statusText}`);
+  const err: any = new Error(String(detailedMessage));
+  err.status = status;
+  err.data = data;
+  err.isServerError = status >= 500;
+  err.isTimeout = status === 504 || /timed?\s*out/i.test(String(detailedMessage));
+  if (isStreamServerError) {
+    err.isStreamServerError = true;
+  }
+  return err;
 }
 
 export async function getProductAlternativesStream(
@@ -79,23 +118,23 @@ export async function getProductAlternativesStream(
           timeoutErr.isStreamServerError = true;
           throw timeoutErr;
         }
-        continue;
+        // Network error / transient disconnect on /api/search-stream: fall back directly to /api/search
+        break;
       }
 
       const contentType = (res.headers.get("content-type") || "").toLowerCase();
 
       if (res.status === 429) {
         const errData = await res.json().catch(() => ({}));
-        const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${res.status}`;
-        const err: any = new Error(detailedMessage);
-        err.status = res.status;
-        err.data = errData;
-        throw err;
+        throw buildHttpApiError(res.status, res.statusText, errData, true);
       }
 
       // If endpoint responded directly with JSON (error or complete result), handle immediately without a duplicate request
       if (contentType.includes("application/json")) {
         const data: any = await res.json().catch(() => ({}));
+        if (isMissingApiRouteJson(res.status, data)) {
+          continue;
+        }
         if (res.ok && Array.isArray(data?.alternatives)) {
           const parsedRes: ProductsResponse = {
             alternatives: sanitizeClientAlternatives(data.alternatives),
@@ -104,14 +143,16 @@ export async function getProductAlternativesStream(
           onBatch?.(parsedRes);
           return parsedRes;
         }
-        const detailedMessage = data.message || data.details || data.error || `HTTP error ${res.status}`;
-        const err: any = new Error(detailedMessage);
-        err.status = res.status;
-        err.data = data;
-        err.isTimeout = res.status === 504 || /timed?\s*out/i.test(String(detailedMessage));
-        err.isServerError = res.status >= 500;
-        err.isStreamServerError = true;
-        throw err;
+        throw buildHttpApiError(res.status, res.statusText, data, true);
+      }
+
+      // Check 5xx BEFORE text/html so reverse-proxy 502/503/504 HTML pages fall back to /api/search retry instead of .php
+      if (res.status >= 500) {
+        if (res.status === 504) {
+          throw buildHttpApiError(res.status, res.statusText, {}, true);
+        }
+        // Transient 502/503 on streaming endpoint: fall back cleanly to standard /api/search (which includes a retry)
+        break;
       }
 
       if (res.ok && res.body && contentType.includes("text/event-stream")) {
@@ -120,10 +161,70 @@ export async function getProductAlternativesStream(
         let buffer = "";
         let totalChars = 0;
         let latestResponse: ProductsResponse | null = null;
+        let receivedDone = false;
+
+        const processEventBlock = (evt: string): ProductsResponse | null => {
+          const lines = evt.split(/\r?\n/);
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const rawPayload = trimmed.slice(5).trim();
+            if (!rawPayload) continue;
+            let parsed: any = null;
+            try {
+              parsed = JSON.parse(rawPayload);
+            } catch {
+              continue;
+            }
+
+            if (parsed.type === "error") {
+              if (latestResponse && latestResponse.alternatives.length > 0) {
+                return latestResponse;
+              }
+              const errText =
+                typeof parsed.details === "string"
+                  ? parsed.details
+                  : (typeof parsed.error === "string" ? parsed.error : "Search stream failed");
+              const streamErr: any = new Error(errText);
+              streamErr.isStreamServerError = true;
+              streamErr.isServerError = true;
+              streamErr.isTimeout = /timed?\s*out/i.test(errText);
+              throw streamErr;
+            }
+            const cleanMessage = typeof parsed.message === "string" ? parsed.message.slice(0, 300) : undefined;
+            if (parsed.type === "batch") {
+              latestResponse = {
+                alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                message: cleanMessage,
+              };
+              onBatch?.(latestResponse);
+            } else if (parsed.type === "done") {
+              receivedDone = true;
+              latestResponse = {
+                alternatives: sanitizeClientAlternatives(parsed.alternatives),
+                message: cleanMessage,
+              };
+              onBatch?.(latestResponse);
+              return latestResponse;
+            }
+          }
+          return null;
+        };
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            const flushed = decoder.decode();
+            if (flushed) buffer += flushed;
+            if (buffer.trim()) {
+              const trailingBlocks = buffer.split(/\r?\n\r?\n/);
+              for (const block of trailingBlocks) {
+                const completed = processEventBlock(block);
+                if (completed) return completed;
+              }
+            }
+            break;
+          }
           const chunkText = decoder.decode(value, { stream: true });
           totalChars += chunkText.length;
           if (totalChars > MAX_CLIENT_STREAM_CHARS) {
@@ -132,79 +233,25 @@ export async function getProductAlternativesStream(
           }
           buffer += chunkText;
 
-          const events = buffer.split("\n\n");
+          const events = buffer.split(/\r?\n\r?\n/);
           buffer = events.pop() || "";
 
           for (const evt of events) {
-            const lines = evt.split("\n");
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith("data:")) continue;
-              const rawPayload = trimmed.slice(5).trim();
-              if (!rawPayload) continue;
-              let parsed: any = null;
-              try {
-                parsed = JSON.parse(rawPayload);
-              } catch {
-                continue;
-              }
-
-              if (parsed.type === "error") {
-                if (latestResponse && latestResponse.alternatives.length > 0) {
-                  return latestResponse;
-                }
-                const errText =
-                  typeof parsed.details === "string"
-                    ? parsed.details
-                    : (typeof parsed.error === "string" ? parsed.error : "Search stream failed");
-                const streamErr: any = new Error(errText);
-                streamErr.isStreamServerError = true;
-                streamErr.isServerError = true;
-                streamErr.isTimeout = /timed?\s*out/i.test(errText);
-                throw streamErr;
-              }
-              const cleanMessage = typeof parsed.message === "string" ? parsed.message.slice(0, 300) : undefined;
-              if (parsed.type === "batch") {
-                latestResponse = {
-                  alternatives: sanitizeClientAlternatives(parsed.alternatives),
-                  message: cleanMessage,
-                };
-                onBatch?.(latestResponse);
-              } else if (parsed.type === "done") {
-                latestResponse = {
-                  alternatives: sanitizeClientAlternatives(parsed.alternatives),
-                  message: cleanMessage,
-                };
-                onBatch?.(latestResponse);
-                return latestResponse;
-              }
-            }
+            const completed = processEventBlock(evt);
+            if (completed) return completed;
           }
         }
 
-        if (latestResponse && latestResponse.alternatives.length > 0) {
+        if (latestResponse && (latestResponse.alternatives.length > 0 || receivedDone)) {
           return latestResponse;
         }
-        // Stream ended cleanly with no items; fall back once to standard endpoint
+        // Stream ended cleanly with no items and no done event; fall back once to standard endpoint
         break;
       }
 
-      // If rewrite wasn't configured (HTML SPA fallback or 404), try next stream endpoint
+      // Only try PHP stream fallback if Express route wasn't mounted (non-JSON 404 or SPA HTML 200)
       if (res.status === 404 || contentType.includes("text/html")) {
         continue;
-      }
-
-      if (res.status >= 500) {
-        const srvErr: any = new Error(
-          res.status === 504
-            ? "Search request timed out. Please try again."
-            : "Temporary server error while searching. Please try again."
-        );
-        srvErr.status = res.status;
-        srvErr.isServerError = true;
-        srvErr.isTimeout = res.status === 504;
-        srvErr.isStreamServerError = true;
-        throw srvErr;
       }
     }
   } catch (err: any) {
@@ -222,12 +269,13 @@ export async function getProductAlternatives(
   language: string = "العربية",
   country?: string
 ): Promise<ProductsResponse | null> {
+  const safeLanguage = (language || "العربية").trim().slice(0, 40);
   const safeCountry = typeof country === "string" && /^[a-zA-Z]{2}$/.test(country.trim())
     ? country.trim().toUpperCase()
     : "";
   const requestBody = JSON.stringify({
     productName: (productName || "").trim().slice(0, 1500),
-    language: (language || "العربية").trim().slice(0, 40),
+    language: safeLanguage,
     country: safeCountry,
   });
 
@@ -244,6 +292,7 @@ export async function getProductAlternatives(
   };
 
   let response: Response | null = null;
+  let parsedResponseData: any = null;
   let lastError: any = null;
 
   const candidateEndpoints = [
@@ -255,26 +304,68 @@ export async function getProductAlternatives(
   ];
 
   try {
-    for (const endpoint of candidateEndpoints) {
-      try {
-        const res = await fetch(endpoint, requestOptions);
-        const ct = (res.headers.get("content-type") || "").toLowerCase();
-        if (res.status !== 404 && !ct.includes("text/html")) {
+    for (let idx = 0; idx < candidateEndpoints.length; idx++) {
+      const endpoint = candidateEndpoints[idx];
+      const maxAttempts = idx === 0 ? 2 : 1; // Retry primary /api/search once on transient network/502/503 glitches
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          const res = await fetch(endpoint, requestOptions);
+          const ct = (res.headers.get("content-type") || "").toLowerCase();
+
+          // Any JSON response from the API (including 400/403/404/429/500/503) is authoritative unless it's a missing-route 404
+          if (ct.includes("application/json")) {
+            const data: any = await res.json().catch(() => ({}));
+            if (isMissingApiRouteJson(res.status, data)) {
+              break; // Try next fallback endpoint
+            }
+            if ((res.status === 502 || res.status === 503) && attempt + 1 < maxAttempts) {
+              await sleepMs(1000);
+              continue;
+            }
+            response = res;
+            parsedResponseData = data;
+            break;
+          }
+
+          // Reverse-proxy 5xx (even HTML 502/503/504) means the route exists but the server had a temporary error
+          if (res.status >= 500) {
+            if ((res.status === 502 || res.status === 503) && attempt + 1 < maxAttempts) {
+              await sleepMs(1000);
+              continue;
+            }
+            throw buildHttpApiError(res.status, res.statusText, {}, false);
+          }
+
+          // Non-JSON 404 or SPA HTML 200 -> try next endpoint (e.g., static PHP hosting)
+          if (res.status === 404 || ct.includes("text/html")) {
+            break;
+          }
+
           response = res;
           break;
+        } catch (err: any) {
+          if (err?.name === "AbortError") {
+            const timeoutErr: any = new Error("Search request timed out. Please try again.");
+            timeoutErr.isTimeout = true;
+            throw timeoutErr;
+          }
+          if (err?.isServerError || err?.status) {
+            throw err;
+          }
+          if (attempt + 1 < maxAttempts) {
+            await sleepMs(1000);
+            continue;
+          }
+          if (!lastError) lastError = err;
         }
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          const timeoutErr: any = new Error("Search request timed out. Please try again.");
-          timeoutErr.isTimeout = true;
-          throw timeoutErr;
-        }
-        if (!lastError) lastError = err;
       }
+
+      if (response) break;
     }
 
     if (response && response.ok) {
-      const data: any = await response.json();
+      const data: any = parsedResponseData ?? (await response.json());
       return {
         alternatives: sanitizeClientAlternatives(data?.alternatives),
         message: typeof data?.message === "string" ? data.message.slice(0, 300) : undefined,
@@ -282,17 +373,17 @@ export async function getProductAlternatives(
     }
 
     if (response && !response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      const detailedMessage = errData.message || errData.details || errData.error || `HTTP error ${response.status}: ${response.statusText}`;
-      const err: any = new Error(detailedMessage);
-      err.status = response.status;
-      err.data = errData;
-      err.isServerError = response.status >= 500;
-      err.isTimeout = response.status === 504 || /timed?\s*out/i.test(String(detailedMessage));
-      throw err;
+      const errData = parsedResponseData ?? (await response.json().catch(() => ({})));
+      throw buildHttpApiError(response.status, response.statusText, errData, false);
     }
 
-    throw lastError || new Error("تعذر الاتصال بخدمة البحث.");
+    const fallbackErr: any = lastError || new Error(
+      safeLanguage === "العربية"
+        ? "تعذر الاتصال بخدمة البحث مؤقتاً. يرجى إعادة المحاولة."
+        : "Unable to reach the search service right now. Please try again."
+    );
+    fallbackErr.isServerError = true;
+    throw fallbackErr;
   } finally {
     clearTimeout(timeoutId);
   }

@@ -566,10 +566,12 @@ function extractMetadataFromHtml(html: string): {
   return { title, brand, price, description, category, siteName, canonicalUrl };
 }
 
-function pinnedSingleHopGet(
+export function pinnedSingleHopGet(
   target: ValidatedPublicUrl,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: { maxBytes?: number; referer?: string; acceptAnyText?: boolean }
 ): Promise<{ statusCode: number; location: string; contentType: string; html: string }> {
+  const maxBytes = options?.maxBytes && options.maxBytes > 0 ? Math.min(options.maxBytes, MAX_HTML_BYTES) : MAX_HTML_BYTES;
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error("Aborted"));
@@ -587,6 +589,18 @@ function pinnedSingleHopGet(
       }
     };
 
+    const headers: Record<string, string> = {
+      Host: target.url.host,
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+      "Accept-Encoding": "gzip, deflate, br",
+    };
+    if (options?.referer) {
+      headers.Referer = options.referer;
+    }
+
     const reqOpts: https.RequestOptions = {
       protocol: target.url.protocol,
       hostname: target.url.hostname,
@@ -594,14 +608,7 @@ function pinnedSingleHopGet(
       path: `${target.url.pathname || "/"}${target.url.search || ""}`,
       method: "GET",
       lookup: pinnedLookup,
-      headers: {
-        Host: target.url.host,
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-      },
+      headers,
       ...(isHttps ? { servername: target.url.hostname, rejectUnauthorized: true } : {}),
     };
 
@@ -627,6 +634,7 @@ function pinnedSingleHopGet(
       }
 
       const isReadableText =
+        options?.acceptAnyText ||
         contentType.includes("text/html") ||
         contentType.includes("application/xhtml+xml") ||
         contentType.includes("text/plain") ||
@@ -653,7 +661,7 @@ function pinnedSingleHopGet(
 
       stream.on("data", (chunk: Buffer) => {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        const remaining = MAX_HTML_BYTES - totalBytes;
+        const remaining = maxBytes - totalBytes;
         if (remaining <= 0) {
           res.destroy();
           finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
@@ -662,7 +670,7 @@ function pinnedSingleHopGet(
         const slice = buf.length > remaining ? buf.subarray(0, remaining) : buf;
         chunks.push(slice);
         totalBytes += slice.length;
-        if (totalBytes >= MAX_HTML_BYTES) {
+        if (totalBytes >= maxBytes) {
           res.destroy();
           finish(null, { statusCode, location: "", contentType, html: Buffer.concat(chunks).toString("utf8") });
         }

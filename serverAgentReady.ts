@@ -568,6 +568,7 @@ function escapeHtmlAttr(value: string): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
@@ -658,10 +659,12 @@ export function get404Html(requestedPath: string): string {
 }
 
 export function get404Markdown(requestedPath: string): string {
-  const safePath = requestedPath.replace(/[\r\n]/g, "").slice(0, 160);
+  const safePath = String(requestedPath || "/")
+    .replace(/[\u0000-\u001F\u007F`<>[\]()\\]/g, "")
+    .slice(0, 120);
   return `# 404 — Page Not Found
 
-The requested URL \`${safePath}\` does not exist on Pezeex.
+The requested URL \`${safePath || "/"}\` does not exist on Pezeex.
 
 ## Available Pages
 

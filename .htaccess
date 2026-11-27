@@ -47,7 +47,7 @@ ErrorDocument 404 /404.html
 </IfModule>
 
 # Block direct public access to sensitive config, env, key, backup, source, and build files (LiteSpeed safe)
-<FilesMatch "^(\.env(\..*)?|\.keys|\.htaccess|\.htpasswd|config(\.example)?\.php|keys\.txt|server\.(cjs|ts|js)|serverUrlAnalyzer\.ts|serverAgentReady\.ts|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|composer\.(json|lock)|bun\.lock|components\.json|metadata\.json|download_logos\.ts|updateTranslations\.js|test-litb\.js|add-reddit\.cjs)$|\.(log|bak|sql|sh|map|orig|swp)$">
+<FilesMatch "^(\.env(\..*)?|\.keys|\.htaccess|\.htpasswd|config(\.example)?\.php|keys\.txt|server\.(cjs|ts|js)|serverUrlAnalyzer\.ts|serverAgentReady\.ts|serverTakeads\.ts|vite\.config\.ts|tsconfig\.json|package(-lock)?\.json|composer\.(json|lock)|bun\.lock|components\.json|metadata\.json|download_logos\.ts|updateTranslations\.js|test-litb\.js|add-reddit\.cjs)$|\.(log|bak|sql|sh|map|cjs|orig|swp)$">
   Require all denied
 </FilesMatch>
 
@@ -55,12 +55,12 @@ ErrorDocument 404 /404.html
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "SAMEORIGIN"
-  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Referrer-Policy "origin"
   Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
   Header always set Cross-Origin-Opener-Policy "same-origin-allow-popups"
   Header always set X-Permitted-Cross-Domain-Policies "none"
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
-  Header set Content-Security-Policy "default-src 'self'; script-src 'self' https://convertlink.com https://*.convertlink.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://www.google.com https://icons.duckduckgo.com https://*.gstatic.com data: blob:; connect-src 'self' https://get.geojs.io https://convertlink.com https://*.convertlink.com; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self'"
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://convertlink.com https://*.convertlink.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://www.google.com https://icons.duckduckgo.com https://*.gstatic.com data: blob:; connect-src 'self' https://get.geojs.io https://convertlink.com https://*.convertlink.com; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self'"
 
   <FilesMatch "^(index\.html|index\.md)$">
     Header always set Vary "Accept"

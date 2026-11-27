@@ -2710,13 +2710,25 @@ export default function App() {
       },
       onSearchResults: (query, result) => {
         navigateToRoute("home");
+        const safeQuery = typeof query === "string" ? query.slice(0, MAX_SEARCH_CHARS) : "";
+        const safeAlternatives = (Array.isArray(result.alternatives) ? (result.alternatives as ProductAlternative[]) : [])
+          .map((item): ProductAlternative | null => {
+            if (!item || typeof item !== "object") return null;
+            const rawUrl = item.exactUrl || item.link;
+            const safeLink = sanitizeExternalHref(rawUrl);
+            if (!safeLink || isNonStoreResult(item.store, item.storeDomain, safeLink)) {
+              return null;
+            }
+            return { ...item, exactUrl: safeLink, link: safeLink, isPromo: Boolean(item.isPromo) };
+          })
+          .filter((item): item is ProductAlternative => item !== null);
         setHistory([
-          { type: "user", content: query },
+          { type: "user", content: safeQuery },
           {
             type: "ai",
             content: {
-              message: typeof result.message === "string" ? result.message : undefined,
-              alternatives: Array.isArray(result.alternatives) ? (result.alternatives as ProductAlternative[]) : [],
+              message: typeof result.message === "string" ? result.message.slice(0, 400) : undefined,
+              alternatives: safeAlternatives,
             },
           },
         ]);
@@ -2869,19 +2881,13 @@ export default function App() {
         // Limit string length to avoid wildly long searches which return 0 results
         if (searchTerm.length > 50) searchTerm = searchTerm.substring(0, 50).trim();
 
-        // Validate and enforce strict HTTPS public URL
-        let safeLink = sanitizeExternalHref(item.exactUrl);
-
+        // Validate and enforce strict HTTPS public URL (already resolved & monetized by Takeads on the server)
+        const safeLink = sanitizeExternalHref(item.exactUrl);
         if (!safeLink || isNonStoreResult(item.store, item.storeDomain, safeLink)) {
-          const domain = (item.storeDomain || "").trim().toLowerCase();
-          if (domain && isValidStoreDomainClient(domain) && !isNonStoreResult(item.store, domain)) {
-            safeLink = `https://${domain}/search?q=${encodeURIComponent(item.searchKey || item.name || searchTerm)}`;
-          } else {
-            return null;
-          }
+          return null;
         }
 
-        return { ...item, link: safeLink, isPromo: false };
+        return { ...item, link: safeLink, isPromo: Boolean(item.isPromo) };
       };
 
       const buildMappedResponse = (resData: ProductsResponse | ProductAlternative[] | null): ProductsResponse | ProductAlternative[] => {
@@ -3444,7 +3450,8 @@ export default function App() {
                                                 <a 
                                                   href={sanitizeExternalHref(item.link)} 
                                                   target="_blank" 
-                                                  rel="noopener noreferrer"
+                                                  rel="noopener"
+                                                  referrerPolicy="origin"
                                                 />
                                               }
                                               nativeButton={false}
